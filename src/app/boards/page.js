@@ -6,12 +6,45 @@ import Sidebar from "@/components/Sidebar";
 import { Plus, FolderOpen, Layout, Trash, X } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
-const TEMPLATE_CATEGORIES = [
-  { key: "personal", label: "Personal" },
-  { key: "productivity", label: "Productivity" },
-  { key: "product_management", label: "Product Management" },
-  { key: "project_management", label: "Project Management" },
-];
+// ✅ Categories with 4 sample images each
+const TEMPLATE_CATEGORIES = {
+  personal: {
+    label: "Personal",
+    images: [
+      "/ptemp1.jpg",
+      "/ptemp2.png",
+      "/ptemp3.jpg",
+      "/ptemp4.jpg",
+    ],
+  },
+  productivity: {
+    label: "Productivity",
+    images: [
+      "/prtemp1.jpg",
+      "/prtemp2.jpg",
+      "/prtemp3.jpg",
+      "/prtemp4.avif",
+    ],
+  },
+  product_management: {
+    label: "Product Management",
+    images: [
+      "/prmtemp1.png",
+      "/prmtemp2.jpg",
+      "/prmtemp3.jpeg",
+      "/prmtemp4.avif",
+    ],
+  },
+  project_management: {
+    label: "Project Management",
+    images: [
+      "/pmtemp1.jpg",
+      "/pmtemp2.jpg",
+      "/pmtemp3.jpg",
+      "/pmtemp4.jpg",
+    ],
+  },
+};
 
 export default function BoardsPage() {
   return (
@@ -30,11 +63,13 @@ export default function BoardsPage() {
 function BoardsContent() {
   const router = useRouter();
   const [boards, setBoards] = useState([]);
-  const [workspaces, setWorkspaces] = useState([{ id: null, name: "No workspace" }]);
+  const [workspaces, setWorkspaces] = useState([
+    { id: null, name: "No workspace" },
+  ]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
 
-  // Load boards + workspaces from Supabase
+  // ✅ Load boards + workspaces
   const load = async () => {
     setLoading(true);
     try {
@@ -66,26 +101,22 @@ function BoardsContent() {
     setBoards((prev) => [...prev, board]);
   };
 
-  // 👇 Navigation logic
+  // ✅ Navigation
   const handleBoardClick = (boardId) => {
     if (!boardId) return;
-    router.push(`/board/${boardId}`); // goes to dynamic board page
+    router.push(`/board/${boardId}`);
   };
+
+  // ✅ Delete
   const deleteBoard = async (boardId) => {
-  try {
-    const { error } = await supabase
-      .from("boards")
-      .delete()
-      .eq("id", boardId);
-
-    if (error) throw error;
-
-    setBoards((prev) => prev.filter((b) => b.id !== boardId));
-  } catch (err) {
-    console.error("Error deleting board:", err.message);
-  }
-};
-
+    try {
+      const { error } = await supabase.from("boards").delete().eq("id", boardId);
+      if (error) throw error;
+      setBoards((prev) => prev.filter((b) => b.id !== boardId));
+    } catch (err) {
+      console.error("Error deleting board:", err.message);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -128,39 +159,43 @@ function BoardsContent() {
         <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 animate-fade-in-up">
           {boards.map((b, index) => (
             <div
-  key={b.id}
-  className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200 hover:scale-105 animate-fade-in-up cursor-pointer relative"
-  style={{ animationDelay: `${index * 0.1}s` }}
-  onClick={() => handleBoardClick(b.id)}
->
-  {/* Icon */}
-  <div className="w-10 h-10 rounded bg-blue-100 flex items-center justify-center mb-3">
-    <Layout className="h-5 w-5 text-blue-600" />
-  </div>
+              key={b.id}
+              className="relative bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition-all duration-200 hover:scale-105 animate-fade-in-up cursor-pointer"
+              style={{ animationDelay: `${index * 0.1}s` }}
+              onClick={() => handleBoardClick(b.id)}
+            >
+              {/* Background Image */}
+              {b.background_image ? (
+                <div
+                  className="h-24 w-full bg-cover bg-center"
+                  style={{ backgroundImage: `url(${b.background_image})` }}
+                />
+              ) : (
+                <div className="h-24 w-full bg-yellow-200" />
+              )}
 
-  {/* Title */}
-  <div className="font-semibold text-gray-900">{b.title}</div>
+              <div className="p-4">
+                <div className="font-semibold text-gray-900">{b.title}</div>
+                {b.workspace_id ? (
+                  <div className="text-sm text-gray-500 mt-1">
+                    Workspace #{b.workspace_id}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-400 mt-1">No workspace</div>
+                )}
+              </div>
 
-  {/* Workspace info */}
-  {b.workspace_id ? (
-    <div className="text-sm text-gray-500 mt-1">
-      Workspace #{b.workspace_id}
-    </div>
-  ) : (
-    <div className="text-sm text-gray-400 mt-1">No workspace</div>
-  )}
-
-  {/* ✅ Trash delete button */}
-  <button
-    onClick={(e) => {
-      e.stopPropagation(); // prevent navigation
-      deleteBoard(b.id);
-    }}
-    className="absolute top-2 right-2 p-1 hover:bg-red-100 rounded"
-  >
-    <Trash className="h-4 w-4 text-red-500" />
-  </button>
-</div>
+              {/* Trash delete button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteBoard(b.id);
+                }}
+                className="absolute top-2 right-2 p-1 bg-white/80 hover:bg-red-100 rounded"
+              >
+                <Trash className="h-4 w-4 text-red-500" />
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -176,11 +211,11 @@ function BoardsContent() {
   );
 }
 
-
 function CreateBoardModal({ workspaces, onClose, onCreated }) {
   const [title, setTitle] = useState("");
   const [workspaceId, setWorkspaceId] = useState(workspaces?.[0]?.id ?? null);
   const [templateCategory, setTemplateCategory] = useState("personal");
+  const [selectedImage, setSelectedImage] = useState(null);
   const [members, setMembers] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -197,14 +232,13 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           {
             title: title.trim(),
             workspace_id: workspaceId || null,
-            // you can later add templateCategory and members in schema if needed
+            background_image: selectedImage || null,
           },
         ])
         .select()
         .single();
 
       if (error) throw error;
-
       onCreated(data);
       onClose();
     } catch (err) {
@@ -235,15 +269,34 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           </label>
           <select
             value={templateCategory}
-            onChange={(e) => setTemplateCategory(e.target.value)}
+            onChange={(e) => {
+              setTemplateCategory(e.target.value);
+              setSelectedImage(null);
+            }}
             className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
           >
-            {TEMPLATE_CATEGORIES.map((c) => (
-              <option key={c.key} value={c.key}>
+            {Object.entries(TEMPLATE_CATEGORIES).map(([key, c]) => (
+              <option key={key} value={key}>
                 {c.label}
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Preview images */}
+        <div className="grid grid-cols-4 gap-2 mb-4">
+          {TEMPLATE_CATEGORIES[templateCategory].images.map((img) => (
+            <div
+              key={img}
+              onClick={() => setSelectedImage(img)}
+              className={`h-16 w-full rounded-lg bg-cover bg-center cursor-pointer border-2 ${
+                selectedImage === img
+                  ? "border-blue-500"
+                  : "border-transparent"
+              }`}
+              style={{ backgroundImage: `url(${img})` }}
+            />
+          ))}
         </div>
 
         {/* Workspace */}
@@ -254,7 +307,9 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           <select
             value={workspaceId ?? ""}
             onChange={(e) =>
-              setWorkspaceId(e.target.value === "" ? null : Number(e.target.value))
+              setWorkspaceId(
+                e.target.value === "" ? null : Number(e.target.value)
+              )
             }
             className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
           >
@@ -279,7 +334,7 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           />
         </div>
 
-        {/* Members (not saved in DB yet) */}
+        {/* Members */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Add members

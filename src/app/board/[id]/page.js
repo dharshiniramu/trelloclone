@@ -260,7 +260,18 @@ const deleteCard = async (listId, cardId) => {
 
 
   return (
-    <div className="h-full bg-gradient-to-br from-yellow-50 to-yellow-100 relative">
+    <div
+  className="h-full relative"
+  style={{
+    backgroundImage: board?.background_image
+      ? `url(${board.background_image})`
+      : "none",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundColor: board?.background_image ? "transparent" : "#FEF9C3", // fallback yellow
+  }}
+>
+
       {/* Board Header */}
       <div className="relative z-10 bg-white/80 backdrop-blur-sm border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
