@@ -10,6 +10,9 @@ import {
   TrendingUp,
   ArrowRight,
   Bell,
+  Check,
+  X,
+  Mail,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -68,6 +71,137 @@ export default function Home() {
 }
 
 function AuthenticatedHome({ username }) {
+  const [invitations, setInvitations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(null);
+  const [tableError, setTableError] = useState(false);
+
+  useEffect(() => {
+    const fetchInvitations = async () => {
+      setLoading(true);
+      try {
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user) return;
+
+        // Get pending invitations for the current user
+        const { data: invitationsData, error: invitationsError } = await supabase
+          .from("board_invitations")
+          .select(`
+            id,
+            board_id,
+            role,
+            created_at,
+            invited_by_user_id,
+            boards(title)
+          `)
+          .eq("invited_user_id", user.id)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+
+        if (invitationsError) {
+          console.error("Error fetching invitations:", invitationsError);
+          console.error("Error details:", {
+            code: invitationsError.code,
+            message: invitationsError.message,
+            details: invitationsError.details,
+            hint: invitationsError.hint
+          });
+          
+          // If table doesn't exist, show error state
+          if (invitationsError.code === '42P01') {
+            console.log("board_invitations table doesn't exist yet. Run the setup SQL script.");
+            setTableError(true);
+            setInvitations([]);
+            return;
+          }
+          
+          // For other errors, still show empty state
+          setInvitations([]);
+          return;
+        }
+
+        // Get usernames for the inviters
+        if (invitationsData && invitationsData.length > 0) {
+          const inviterIds = [...new Set(invitationsData.map(inv => inv.invited_by_user_id))];
+          const { data: profiles, error: profilesError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .in("id", inviterIds);
+
+          if (!profilesError && profiles) {
+            // Add usernames to invitations
+            const invitationsWithUsernames = invitationsData.map(invitation => ({
+              ...invitation,
+              inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
+            }));
+            setInvitations(invitationsWithUsernames);
+          } else {
+            setInvitations(invitationsData);
+          }
+        } else {
+          setInvitations(invitationsData || []);
+        }
+      } catch (error) {
+        console.error("Error fetching invitations:", error);
+        setInvitations([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInvitations();
+  }, []);
+
+  const handleInvitationResponse = async (invitationId, action) => {
+    setProcessing(invitationId);
+    try {
+      if (action === 'accept') {
+        // Use the database function to accept invitation
+        const { data, error } = await supabase.rpc('accept_board_invitation', {
+          invitation_id: invitationId
+        });
+
+        if (error) {
+          console.error("Error accepting invitation:", error);
+          alert("Failed to accept invitation. Please try again.");
+          return;
+        }
+
+        if (data) {
+          // Remove the invitation from the list
+          setInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+          alert("Successfully joined the board!");
+        } else {
+          alert("Failed to accept invitation. It may have already been processed.");
+        }
+      } else if (action === 'decline') {
+        // Update invitation status to declined
+        const { error } = await supabase
+          .from("board_invitations")
+          .update({ 
+            status: 'declined',
+            responded_at: new Date().toISOString()
+          })
+          .eq("id", invitationId);
+
+        if (error) {
+          console.error("Error declining invitation:", error);
+          alert("Failed to decline invitation. Please try again.");
+          return;
+        }
+
+        // Remove the invitation from the list
+        setInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+        alert("Invitation declined.");
+      }
+    } catch (error) {
+      console.error("Error handling invitation:", error);
+      alert("An unexpected error occurred. Please try again.");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   return (
     <div className="flex h-[calc(100vh-64px)] bg-gray-50">
       {/* Sidebar */}
@@ -81,19 +215,95 @@ function AuthenticatedHome({ username }) {
             Welcome, {username || 'User'}!
           </h1>
 
-          {/* Empty state initially */}
-          <div className="bg-white border border-gray-200 rounded-xl p-10 text-center animate-fade-in-up">
-            <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
-              <Bell className="h-7 w-7 text-blue-600" />
+          {loading ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-10 text-center animate-fade-in-up">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-500">Loading invitations...</p>
             </div>
-            <p className="text-lg font-medium text-gray-900 mb-1">
-              No notifications yet
-            </p>
-            <p className="text-gray-500">
-              You'll see updates here when there's activity on your boards and
-              workspaces.
-            </p>
-          </div>
+          ) : tableError ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-10 text-center animate-fade-in-up">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-yellow-50 flex items-center justify-center">
+                <Bell className="h-7 w-7 text-yellow-600" />
+              </div>
+              <p className="text-lg font-medium text-gray-900 mb-1">
+                Setup Required
+              </p>
+              <p className="text-gray-500 mb-4">
+                The invitation system needs to be set up. Please run the database setup script to enable board invitations.
+              </p>
+              <div className="text-sm text-gray-400">
+                Run the SQL script from setup_board_members_table.sql in your Supabase SQL Editor
+              </div>
+            </div>
+          ) : invitations.length === 0 ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-10 text-center animate-fade-in-up">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
+                <Bell className="h-7 w-7 text-blue-600" />
+              </div>
+              <p className="text-lg font-medium text-gray-900 mb-1">
+                No notifications yet
+              </p>
+              <p className="text-gray-500">
+                You'll see board invitations and updates here when there's activity.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4 animate-fade-in-up">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                Board Invitations ({invitations.length})
+              </h2>
+              {invitations.map((invitation) => (
+                <div
+                  key={invitation.id}
+                  className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start space-x-4">
+                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Mail className="h-6 w-6 text-blue-600" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                          Board Invitation
+                        </h3>
+                        <p className="text-gray-600 mb-2">
+                          <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> invited you to join the board{' '}
+                          <span className="font-medium text-blue-600">"{invitation.boards?.title}"</span>
+                        </p>
+                        <div className="flex items-center space-x-4 text-sm text-gray-500">
+                          <span>Role: {invitation.role}</span>
+                          <span>•</span>
+                          <span>{new Date(invitation.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleInvitationResponse(invitation.id, 'accept')}
+                        disabled={processing === invitation.id}
+                        className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                      >
+                        {processing === invitation.id ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        ) : (
+                          <Check className="h-4 w-4 mr-2" />
+                        )}
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => handleInvitationResponse(invitation.id, 'decline')}
+                        disabled={processing === invitation.id}
+                        className="flex items-center px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                      >
+                        <X className="h-4 w-4 mr-2" />
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
