@@ -108,6 +108,15 @@ function BoardView({ board, router }) {
   const [viewMode, setViewMode] = useState('board'); // 'board' or 'calendar'
   const [allBoards, setAllBoards] = useState([]);
   const [loadingBoards, setLoadingBoards] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filters, setFilters] = useState({
+    labels: [],
+    dateRange: {
+      start: null,
+      end: null
+    },
+    dueDateFilter: 'all' // 'all', 'overdue', 'due_today', 'due_this_week', 'due_this_month'
+  });
 
   // Get current user
   useEffect(() => {
@@ -189,6 +198,115 @@ function BoardView({ board, router }) {
   const isBoardOwner = () => {
     if (!currentUser || !board) return false;
     return board.user_id === currentUser.id;
+  };
+
+  // Filter cards based on current filters
+  const filterCards = (cards) => {
+    if (!cards) return [];
+    
+    return cards.filter(card => {
+      // Filter by labels
+      if (filters.labels.length > 0) {
+        const cardLabels = card.labels || [];
+        const hasMatchingLabel = filters.labels.some(filterLabel => 
+          cardLabels.some(cardLabel => cardLabel.id === filterLabel.id)
+        );
+        if (!hasMatchingLabel) return false;
+      }
+
+      // Filter by due date
+      if (filters.dueDateFilter !== 'all' && card.due_date) {
+        const dueDate = new Date(card.due_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        switch (filters.dueDateFilter) {
+          case 'overdue':
+            if (dueDate >= today) return false;
+            break;
+          case 'due_today':
+            if (dueDate.toDateString() !== today.toDateString()) return false;
+            break;
+          case 'due_this_week':
+            const weekEnd = new Date(today);
+            weekEnd.setDate(today.getDate() + 7);
+            if (dueDate < today || dueDate > weekEnd) return false;
+            break;
+          case 'due_this_month':
+            const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+            if (dueDate < today || dueDate > monthEnd) return false;
+            break;
+        }
+      }
+
+      // Filter by custom date range
+      if (filters.dateRange.start || filters.dateRange.end) {
+        const cardDate = card.due_date ? new Date(card.due_date) : null;
+        if (!cardDate) return false;
+        
+        if (filters.dateRange.start) {
+          const startDate = new Date(filters.dateRange.start);
+          startDate.setHours(0, 0, 0, 0);
+          if (cardDate < startDate) return false;
+        }
+        
+        if (filters.dateRange.end) {
+          const endDate = new Date(filters.dateRange.end);
+          endDate.setHours(23, 59, 59, 999);
+          if (cardDate > endDate) return false;
+        }
+      }
+
+      return true;
+    });
+  };
+
+  // Get all unique labels from all cards
+  const getAllLabels = () => {
+    const allCards = lists.flatMap(list => list.cards || []);
+    const labelMap = new Map();
+    
+    allCards.forEach(card => {
+      if (card.labels && Array.isArray(card.labels)) {
+        card.labels.forEach(label => {
+          if (!labelMap.has(label.id)) {
+            labelMap.set(label.id, label);
+          }
+        });
+      }
+    });
+    
+    return Array.from(labelMap.values());
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setFilters({
+      labels: [],
+      dateRange: {
+        start: null,
+        end: null
+      },
+      dueDateFilter: 'all'
+    });
+  };
+
+  // Check if any filters are active
+  const hasActiveFilters = () => {
+    return filters.labels.length > 0 || 
+           filters.dateRange.start || 
+           filters.dateRange.end || 
+           filters.dueDateFilter !== 'all';
+  };
+
+  // Get total filtered cards count
+  const getFilteredCardsCount = () => {
+    return lists.reduce((total, list) => total + filterCards(list.cards).length, 0);
+  };
+
+  // Get total cards count
+  const getTotalCardsCount = () => {
+    return lists.reduce((total, list) => total + (list.cards?.length || 0), 0);
   };
 
   useEffect(() => {
@@ -377,13 +495,42 @@ const deleteCard = async (listId, cardId) => {
             >
               <ArrowLeft className="h-5 w-5 text-gray-600" />
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">{board.title}</h1>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">{board.title}</h1>
+              {hasActiveFilters() && (
+                <div className="text-sm text-blue-600 mt-1">
+                  Showing {getFilteredCardsCount()} of {getTotalCardsCount()} cards
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center space-x-3">
-            <button className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
-              <Filter className="h-4 w-4" />
-              <span>Filter</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button 
+                onClick={() => setShowFilterModal(true)}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                  hasActiveFilters() 
+                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' 
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <Filter className="h-4 w-4" />
+                <span>Filter</span>
+                {hasActiveFilters() && (
+                  <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                )}
+              </button>
+              {hasActiveFilters() && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center space-x-1 px-2 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+                  title="Clear all filters"
+                >
+                  <X className="h-4 w-4" />
+                  <span className="text-sm">Clear</span>
+                </button>
+              )}
+            </div>
             <button className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
               <Star className="h-4 w-4" />
               <span>Favorites</span>
@@ -451,12 +598,23 @@ const deleteCard = async (listId, cardId) => {
                         {...provided.droppableProps}
                         className="p-3 space-y-3 min-h-[200px]"
                       >
-                        {list.cards.map((card, index) => (
-                          <Draggable
-  key={card.id}
-  draggableId={card.id.toString()}
-  index={index}
->
+                        {filterCards(list.cards).length === 0 && hasActiveFilters() ? (
+                          <div className="text-center py-8 text-gray-500">
+                            <div className="text-sm">No cards match the current filters</div>
+                            <button
+                              onClick={clearFilters}
+                              className="text-blue-600 hover:text-blue-800 text-sm mt-2 underline"
+                            >
+                              Clear filters to see all cards
+                            </button>
+                          </div>
+                        ) : (
+                          filterCards(list.cards).map((card, index) => (
+                            <Draggable
+                              key={card.id}
+                              draggableId={card.id.toString()}
+                              index={index}
+                            >
   {(provided) => (
     <div
       ref={provided.innerRef}
@@ -503,7 +661,8 @@ const deleteCard = async (listId, cardId) => {
   )}
 </Draggable>
 
-                        ))}
+                          ))
+                        )}
                         {provided.placeholder}
                         <button
                           onClick={() => addCard(list.id)}
@@ -566,6 +725,17 @@ const deleteCard = async (listId, cardId) => {
         <CalendarView 
           lists={lists}
           onCardClick={handleCardClick}
+        />
+      )}
+
+      {/* Filter Modal */}
+      {showFilterModal && (
+        <FilterModal
+          filters={filters}
+          setFilters={setFilters}
+          allLabels={getAllLabels()}
+          onClose={() => setShowFilterModal(false)}
+          onClearFilters={clearFilters}
         />
       )}
 
@@ -640,6 +810,194 @@ const deleteCard = async (listId, cardId) => {
               <Layout className="h-4 w-4" />
               <span>Switch Boards</span>
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Filter Modal Component
+function FilterModal({ filters, setFilters, allLabels, onClose, onClearFilters }) {
+  const [localFilters, setLocalFilters] = useState(filters);
+
+  const handleLabelToggle = (label) => {
+    setLocalFilters(prev => ({
+      ...prev,
+      labels: prev.labels.some(l => l.id === label.id)
+        ? prev.labels.filter(l => l.id !== label.id)
+        : [...prev.labels, label]
+    }));
+  };
+
+  const handleDateRangeChange = (field, value) => {
+    setLocalFilters(prev => ({
+      ...prev,
+      dateRange: {
+        ...prev.dateRange,
+        [field]: value
+      }
+    }));
+  };
+
+  const handleDueDateFilterChange = (value) => {
+    setLocalFilters(prev => ({
+      ...prev,
+      dueDateFilter: value
+    }));
+  };
+
+  const applyFilters = () => {
+    setFilters(localFilters);
+    onClose();
+  };
+
+  const clearAllFilters = () => {
+    setLocalFilters({
+      labels: [],
+      dateRange: {
+        start: null,
+        end: null
+      },
+      dueDateFilter: 'all'
+    });
+    onClearFilters();
+  };
+
+  const hasActiveFilters = () => {
+    return localFilters.labels.length > 0 || 
+           localFilters.dateRange.start || 
+           localFilters.dateRange.end || 
+           localFilters.dueDateFilter !== 'all';
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Filter Cards</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6">
+          {/* Labels Filter */}
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+              <Tag className="h-5 w-5 mr-2" />
+              Filter by Labels
+            </h3>
+            {allLabels.length === 0 ? (
+              <p className="text-gray-500 text-sm">No labels found in this board</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {allLabels.map((label) => (
+                  <button
+                    key={label.id}
+                    onClick={() => handleLabelToggle(label)}
+                    className={`flex items-center space-x-2 p-3 rounded-lg border-2 transition-all duration-200 ${
+                      localFilters.labels.some(l => l.id === label.id)
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded ${label.color}`}></div>
+                    <span className="text-sm font-medium">{label.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Due Date Filter */}
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+              <Clock className="h-5 w-5 mr-2" />
+              Filter by Due Date
+            </h3>
+            <div className="space-y-2">
+              {[
+                { value: 'all', label: 'All cards' },
+                { value: 'overdue', label: 'Overdue' },
+                { value: 'due_today', label: 'Due today' },
+                { value: 'due_this_week', label: 'Due this week' },
+                { value: 'due_this_month', label: 'Due this month' }
+              ].map((option) => (
+                <label key={option.value} className="flex items-center space-x-3 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="dueDateFilter"
+                    value={option.value}
+                    checked={localFilters.dueDateFilter === option.value}
+                    onChange={(e) => handleDueDateFilterChange(e.target.value)}
+                    className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Date Range */}
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+              <Calendar className="h-5 w-5 mr-2" />
+              Custom Date Range
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={localFilters.dateRange.start || ''}
+                  onChange={(e) => handleDateRangeChange('start', e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={localFilters.dateRange.end || ''}
+                  onChange={(e) => handleDateRangeChange('end', e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+          <div className="flex justify-between items-center">
+            <button
+              onClick={clearAllFilters}
+              disabled={!hasActiveFilters()}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+            >
+              Clear All
+            </button>
+            <div className="flex space-x-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={applyFilters}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+              >
+                Apply Filters
+              </button>
+            </div>
           </div>
         </div>
       </div>
