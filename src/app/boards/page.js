@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, FolderOpen, Layout, Trash, X } from "lucide-react";
+import { Plus, FolderOpen, Layout, Trash, X, Star } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 // ✅ Categories with 4 sample images each
@@ -119,7 +119,32 @@ function BoardsContent() {
         return false;
       });
 
-      setBoards(userBoards);
+      // Fetch user's favorite boards
+      const { data: favoritesData, error: favoritesError } = await supabase
+        .from("board_favorites")
+        .select("board_id")
+        .eq("user_id", user.id);
+
+      if (favoritesError) {
+        console.error("Error loading favorites:", favoritesError);
+      }
+
+      const favoriteBoardIds = new Set((favoritesData || []).map(fav => fav.board_id));
+
+      // Add favorite status to boards and sort (favorites first)
+      const boardsWithFavorites = userBoards.map(board => ({
+        ...board,
+        isFavorite: favoriteBoardIds.has(board.id)
+      }));
+
+      // Sort boards: favorites first, then by creation date
+      const sortedBoards = boardsWithFavorites.sort((a, b) => {
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      });
+
+      setBoards(sortedBoards);
 
       const { data: wsData, error: wsError } = await supabase
         .from("workspaces")
@@ -243,7 +268,12 @@ function BoardsContent() {
               )}
 
               <div className="p-4">
-                <div className="font-semibold text-gray-900">{b.title}</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-semibold text-gray-900 flex-1 truncate">{b.title}</div>
+                  {b.isFavorite && (
+                    <Star className="h-4 w-4 text-red-500 fill-current flex-shrink-0 ml-2" />
+                  )}
+                </div>
                 <div className="flex items-center justify-between mt-1">
                   {b.workspace_id ? (
                     <div className="text-sm text-gray-500">

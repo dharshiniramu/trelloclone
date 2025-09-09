@@ -117,6 +117,8 @@ function BoardView({ board, router }) {
     },
     dueDateFilter: 'all' // 'all', 'overdue', 'due_today', 'due_this_week', 'due_this_month'
   });
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
 
   // Get current user
   useEffect(() => {
@@ -135,6 +137,13 @@ function BoardView({ board, router }) {
       fetchAllBoards();
     }
   }, [currentUser]);
+
+  // Check favorite status when user and board are available
+  useEffect(() => {
+    if (currentUser && board) {
+      checkIfFavorite();
+    }
+  }, [currentUser, board]);
 
   // Fetch boards where current user is owner or member
   const fetchAllBoards = async () => {
@@ -307,6 +316,66 @@ function BoardView({ board, router }) {
   // Get total cards count
   const getTotalCardsCount = () => {
     return lists.reduce((total, list) => total + (list.cards?.length || 0), 0);
+  };
+
+  // Check if board is favorite
+  const checkIfFavorite = async () => {
+    if (!currentUser || !board) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from("board_favorites")
+        .select("id")
+        .eq("user_id", currentUser.id)
+        .eq("board_id", board.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error("Error checking favorite status:", error);
+        return;
+      }
+
+      setIsFavorite(!!data);
+    } catch (err) {
+      console.error("Error checking favorite status:", err);
+    }
+  };
+
+  // Toggle favorite status
+  const toggleFavorite = async () => {
+    if (!currentUser || !board || favoriteLoading) return;
+
+    setFavoriteLoading(true);
+    try {
+      if (isFavorite) {
+        // Remove from favorites
+        const { error } = await supabase
+          .from("board_favorites")
+          .delete()
+          .eq("user_id", currentUser.id)
+          .eq("board_id", board.id);
+
+        if (error) throw error;
+        setIsFavorite(false);
+      } else {
+        // Add to favorites
+        const { error } = await supabase
+          .from("board_favorites")
+          .insert([{
+            user_id: currentUser.id,
+            board_id: board.id
+          }]);
+
+        if (error) throw error;
+        setIsFavorite(true);
+      }
+    } catch (err) {
+      console.error("Error toggling favorite:", err);
+      // Show error message to user
+      alert("Failed to update favorite status. Please try again.");
+    } finally {
+      setFavoriteLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -531,10 +600,28 @@ const deleteCard = async (listId, cardId) => {
                 </button>
               )}
             </div>
-            <button className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
-              <Star className="h-4 w-4" />
-              <span>Favorites</span>
-            </button>
+            <div className="relative group">
+              <button 
+                onClick={toggleFavorite}
+                disabled={favoriteLoading}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                  isFavorite 
+                    ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                    : 'text-gray-700 hover:bg-gray-100'
+                } ${favoriteLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <Star className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+                <span>{isFavorite ? 'Favorited' : 'Favorites'}</span>
+                {favoriteLoading && (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                )}
+              </button>
+              {/* Tooltip - positioned below the button */}
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
+                {isFavorite ? 'Remove from favorites' : 'Click to make this board your favorite'}
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-b-gray-900"></div>
+              </div>
+            </div>
             <button className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
               <Share2 className="h-4 w-4" />
               <span>Share</span>
