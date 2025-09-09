@@ -119,6 +119,7 @@ function BoardView({ board, router }) {
   });
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // Get current user
   useEffect(() => {
@@ -622,7 +623,10 @@ const deleteCard = async (listId, cardId) => {
                 <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-b-gray-900"></div>
               </div>
             </div>
-            <button className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg">
+            <button 
+              onClick={() => setShowShareModal(true)}
+              className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+            >
               <Share2 className="h-4 w-4" />
               <span>Share</span>
             </button>
@@ -815,6 +819,14 @@ const deleteCard = async (listId, cardId) => {
         />
       )}
 
+      {/* Share Modal */}
+      {showShareModal && (
+        <ShareModal
+          board={board}
+          onClose={() => setShowShareModal(false)}
+        />
+      )}
+
       {/* Filter Modal */}
       {showFilterModal && (
         <FilterModal
@@ -898,6 +910,172 @@ const deleteCard = async (listId, cardId) => {
               <span>Switch Boards</span>
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Share Modal Component
+function ShareModal({ board, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const [shareLink, setShareLink] = useState('');
+
+  // Generate share link when modal opens
+  useEffect(() => {
+    if (board) {
+      const baseUrl = window.location.origin;
+      const link = `${baseUrl}/board/${board.id}`;
+      setShareLink(link);
+    }
+  }, [board]);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = shareLink;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const shareViaEmail = () => {
+    const subject = `Check out this board: ${board.title}`;
+    const body = `I'd like to share this board with you: ${shareLink}`;
+    const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailtoLink);
+  };
+
+  const shareViaTwitter = () => {
+    const text = `Check out this board: ${board.title}`;
+    const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareLink)}`;
+    window.open(twitterUrl, '_blank');
+  };
+
+  const shareViaLinkedIn = () => {
+    const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareLink)}`;
+    window.open(linkedinUrl, '_blank');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Share Board</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Board Info */}
+          <div className="text-center">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">{board.title}</h3>
+            <p className="text-sm text-gray-500">Share this board with others</p>
+          </div>
+
+          {/* Share Link */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Share Link
+            </label>
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                value={shareLink}
+                readOnly
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-sm"
+              />
+              <button
+                onClick={copyToClipboard}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                  copied
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            {copied && (
+              <p className="text-green-600 text-xs mt-1">Link copied to clipboard!</p>
+            )}
+          </div>
+
+          {/* Share Options */}
+          <div>
+            <h4 className="text-sm font-medium text-gray-700 mb-3">Share via</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={shareViaEmail}
+                className="flex items-center justify-center space-x-2 p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                <div className="w-5 h-5 bg-blue-500 rounded flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">@</span>
+                </div>
+                <span className="text-sm">Email</span>
+              </button>
+
+              <button
+                onClick={shareViaTwitter}
+                className="flex items-center justify-center space-x-2 p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                <div className="w-5 h-5 bg-blue-400 rounded flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">𝕏</span>
+                </div>
+                <span className="text-sm">Twitter</span>
+              </button>
+
+              <button
+                onClick={shareViaLinkedIn}
+                className="flex items-center justify-center space-x-2 p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                <div className="w-5 h-5 bg-blue-700 rounded flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">in</span>
+                </div>
+                <span className="text-sm">LinkedIn</span>
+              </button>
+
+              <button
+                onClick={copyToClipboard}
+                className="flex items-center justify-center space-x-2 p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                <div className="w-5 h-5 bg-gray-500 rounded flex items-center justify-center">
+                  <span className="text-white text-xs">📋</span>
+                </div>
+                <span className="text-sm">Copy Link</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Note */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-xs text-blue-700">
+              <strong>Note:</strong> Anyone with this link can view the board. Make sure to only share with trusted people.
+            </p>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors duration-200"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>
