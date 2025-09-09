@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 import { supabase } from "@/lib/supabaseClient";
@@ -21,6 +21,7 @@ import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 
 export default function BoardViewPage() {
   const params = useParams();
+  const router = useRouter();
   const boardId = params.id;
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +74,7 @@ export default function BoardViewPage() {
           </div>
         </div>
       </>
-    );
+    );   
   }
 
   return (
@@ -82,14 +83,14 @@ export default function BoardViewPage() {
       <div className="flex h-[calc(100vh-64px)] bg-gray-50">
         <Sidebar />
         <main className="flex-1 overflow-auto">
-          <BoardView board={board} />
+          <BoardView board={board} router={router} />
         </main>
       </div>
     </>
   );
 }
 
-function BoardView({ board }) {
+function BoardView({ board, router }) {
   const [lists, setLists] = useState([]);
   const [editingCard, setEditingCard] = useState(null);
   const [showCardModal, setShowCardModal] = useState(false);
@@ -296,7 +297,10 @@ const deleteCard = async (listId, cardId) => {
       <div className="relative z-10 bg-white/80 backdrop-blur-sm border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">
+            <button 
+              onClick={() => router.push('/boards')}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+            >
               <ArrowLeft className="h-5 w-5 text-gray-600" />
             </button>
             <h1 className="text-2xl font-bold text-gray-900">{board.title}</h1>
@@ -610,41 +614,127 @@ function AddMembersModal({ boardId, onClose }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isOwnerSearch, setIsOwnerSearch] = useState(false);
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        setCurrentUser(user);
+      }
+    };
+    getCurrentUser();
+  }, []);
+
 
   // Search for users based on email or username
   const searchUsers = async (query) => {
     if (!query.trim()) {
       setSearchResults([]);
+      setIsOwnerSearch(false);
       return;
     }
 
     setLoading(true);
     try {
-      // First try to search with email column (for new users)
-      let { data: profiles, error: profilesError } = await supabase
+      // Check if user is searching for themselves
+      if (currentUser) {
+        const { data: currentUserProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .eq("id", currentUser.id)
+          .single();
+
+        if (!profileError && currentUserProfile) {
+          const isSearchingSelf = 
+            currentUserProfile.username?.toLowerCase().includes(query.toLowerCase()) ||
+            currentUserProfile.email?.toLowerCase().includes(query.toLowerCase());
+          
+          if (isSearchingSelf) {
+            setIsOwnerSearch(true);
+            setSearchResults([]);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      setIsOwnerSearch(false);
+
+      // Search for other users - try multiple approaches
+      let profiles = [];
+      let profilesError = null;
+
+      // First, try to search with both username and email
+      const { data: searchResults, error: searchError } = await supabase
         .from("profiles")
         .select("id, username, email")
         .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
         .limit(10);
 
-      // If that fails (email column might not exist), fallback to username only
-      if (profilesError && profilesError.code === '42703') { // column doesn't exist
+      if (searchError) {
+        
+        // If email column doesn't exist, fallback to username only
+        if (searchError.code === '42703') {
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        } else {
+          // For other errors, try username search only
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        }
+      } else if (searchResults) {
+        profiles = searchResults;
+      }
+
+      // If no results with the OR query, try separate searches
+      if (profiles.length === 0) {
+        // Try username search
         const { data: usernameResults, error: usernameError } = await supabase
           .from("profiles")
-          .select("id, username")
+          .select("id, username, email")
           .ilike("username", `%${query}%`)
-          .limit(10);
+          .limit(5);
 
         if (!usernameError && usernameResults) {
-          setSearchResults(usernameResults.map(p => ({ ...p, email: null })));
+          profiles = [...profiles, ...usernameResults];
         }
-      } else if (!profilesError && profiles) {
-        setSearchResults(profiles);
-      } else if (profilesError) {
-        console.error("Error searching profiles:", profilesError);
+
+        // Try email search (if email column exists)
+        const { data: emailResults, error: emailError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("email", `%${query}%`)
+          .limit(5);
+
+        if (!emailError && emailResults) {
+          // Merge results, avoiding duplicates
+          const existingIds = profiles.map(p => p.id);
+          const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
+          profiles = [...profiles, ...newEmailResults];
+        }
       }
+
+      setSearchResults(profiles);
     } catch (error) {
       console.error("Error searching users:", error);
+      setSearchResults([]);
     } finally {
       setLoading(false);
     }
@@ -830,8 +920,23 @@ function AddMembersModal({ boardId, onClose }) {
             )}
           </div>
 
+          {/* Owner Search Message */}
+          {isOwnerSearch && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  👑
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900">You are the owner of this board</div>
+                  <div className="text-sm text-blue-700">You don't need to invite yourself!</div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Search Results Dropdown */}
-          {searchResults.length > 0 && (
+          {searchResults.length > 0 && !isOwnerSearch && (
             <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
               {searchResults.map((user) => (
                 <button
@@ -839,14 +944,29 @@ function AddMembersModal({ boardId, onClose }) {
                   onClick={() => handleUserSelect(user)}
                   className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
                 >
-                  <div className="font-medium text-gray-900">
-                    {user.username}
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {user.username?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {user.username}
+                      </div>
+                      {user.email && (
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                      )}
+                    </div>
                   </div>
-                  {user.email && (
-                    <div className="text-sm text-gray-500">{user.email}</div>
-                  )}
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* No Results Message */}
+          {searchQuery && searchResults.length === 0 && !loading && !isOwnerSearch && (
+            <div className="p-4 text-center text-gray-500">
+              <div className="text-sm">No users found matching "{searchQuery}"</div>
+              <div className="text-xs text-gray-400 mt-1">Try searching by username or email</div>
             </div>
           )}
 
