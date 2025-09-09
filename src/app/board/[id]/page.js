@@ -15,6 +15,11 @@ import {
   ChevronUp,
   X,
   Trash,
+  Calendar,
+  Layout,
+  Tag,
+  Clock,
+  Grid3X3,
 } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 
@@ -97,7 +102,11 @@ function BoardView({ board }) {
   const [newListTitle, setNewListTitle] = useState("");
   const [showAddMembersModal, setShowAddMembersModal] = useState(false);
   const [showExistingMembersModal, setShowExistingMembersModal] = useState(false);
+  const [showSwitchBoardsModal, setShowSwitchBoardsModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [viewMode, setViewMode] = useState('board'); // 'board' or 'calendar'
+  const [allBoards, setAllBoards] = useState([]);
+  const [loadingBoards, setLoadingBoards] = useState(false);
 
   // Get current user
   useEffect(() => {
@@ -109,6 +118,71 @@ function BoardView({ board }) {
     };
     getCurrentUser();
   }, []);
+
+  // Refetch boards when currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      fetchAllBoards();
+    }
+  }, [currentUser]);
+
+  // Fetch boards where current user is owner or member
+  const fetchAllBoards = async () => {
+    if (!currentUser) return;
+    
+    setLoadingBoards(true);
+    try {
+      // Get boards where user is the owner
+      const { data: ownedBoards, error: ownedError } = await supabase
+        .from("boards")
+        .select("id, title, background_image, user_id")
+        .eq("user_id", currentUser.id);
+
+      if (ownedError) throw ownedError;
+
+      // Get boards where user is a member (check the members array)
+      const { data: allBoards, error: allBoardsError } = await supabase
+        .from("boards")
+        .select("id, title, background_image, user_id, members");
+
+      if (allBoardsError) throw allBoardsError;
+
+      // Filter boards where user is a member (not owner)
+      const memberBoards = allBoards?.filter(board => {
+        // Skip if this board is already in ownedBoards (user is owner)
+        if (board.user_id === currentUser.id) return false;
+        
+        // Check if user is a member of this board
+        const members = board.members || [];
+        return members.some(member => member.user_id === currentUser.id);
+      }) || [];
+
+      // Combine owned and member boards, remove duplicates
+      const allUserBoards = [...(ownedBoards || []), ...memberBoards];
+      const uniqueBoards = allUserBoards.filter((board, index, self) => 
+        index === self.findIndex(b => b.id === board.id)
+      );
+
+      setAllBoards(uniqueBoards);
+    } catch (err) {
+      console.error("Error fetching user boards:", err.message);
+    } finally {
+      setLoadingBoards(false);
+    }
+  };
+
+  // Handle view mode change
+  const handleViewModeChange = (mode) => {
+    setViewMode(mode);
+    if (mode === 'calendar') {
+      // Calendar view logic will be handled in render
+    }
+  };
+
+  // Handle board switch
+  const handleBoardSwitch = (boardId) => {
+    window.location.href = `/board/${boardId}`;
+  };
 
   // Helper function to check if current user is board owner
   const isBoardOwner = () => {
@@ -134,7 +208,7 @@ function BoardView({ board }) {
         listsData.map(async (list) => {
           const { data: cards, error: cardsError } = await supabase
             .from("cards")
-            .select("id, title, description, due_date, label, list_id")
+            .select("id, title, description, due_date, start_date, labels, attachments, list_id")
             .eq("list_id", list.id);
 
           if (cardsError) {
@@ -335,9 +409,11 @@ const deleteCard = async (listId, cardId) => {
         </div>
       </div>
 
-      {/* Kanban Lists with DnD */}
-      <DragDropContext onDragEnd={handleDragEnd}>
-        <div className="relative z-10 p-6 pb-20 flex space-x-6 h-full overflow-x-auto">
+      {/* Main Content Area */}
+      {viewMode === 'board' ? (
+        /* Kanban Lists with DnD */
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <div className="relative z-10 p-6 pb-20 flex space-x-6 h-full overflow-x-auto">
           {lists.map((list) => (
             <div key={list.id} className="flex-shrink-0 w-80">
               <div className="bg-white/90 rounded-lg shadow-sm border border-gray-200">
@@ -387,11 +463,25 @@ const deleteCard = async (listId, cardId) => {
     >
       <h4 className="font-medium text-sm">{card.title}</h4>
       <div className="flex items-center space-x-2 text-xs text-gray-500 mt-2">
-        {card.label && <span>🏷 {card.label}</span>}
+        {card.labels && card.labels.length > 0 && (
+          <div className="flex space-x-1">
+            {card.labels.map((label, index) => (
+              <span
+                key={index}
+                className={`${label.color} text-white px-1 py-0.5 rounded text-xs`}
+              >
+                {label.name}
+              </span>
+            ))}
+          </div>
+        )}
         {card.due_date && (
           <span>
             📅 {new Date(card.due_date).toLocaleDateString()}
           </span>
+        )}
+        {card.attachments && card.attachments.length > 0 && (
+          <span>📎 {card.attachments.length}</span>
         )}
       </div>
 
@@ -467,6 +557,13 @@ const deleteCard = async (listId, cardId) => {
           )}
         </div>
       </DragDropContext>
+      ) : (
+        /* Calendar View */
+        <CalendarView 
+          lists={lists}
+          onCardClick={handleCardClick}
+        />
+      )}
 
       {/* Card Edit Modal */}
       {showCardModal && editingCard && (
@@ -500,22 +597,78 @@ const deleteCard = async (listId, cardId) => {
           onClose={() => setShowExistingMembersModal(false)}
         />
       )}
+
+      {/* Switch Boards Modal */}
+      {showSwitchBoardsModal && (
+        <SwitchBoardsModal
+          boards={allBoards}
+          currentBoardId={board.id}
+          loading={loadingBoards}
+          currentUser={currentUser}
+          onClose={() => setShowSwitchBoardsModal(false)}
+          onBoardSelect={handleBoardSwitch}
+        />
+      )}
+
+      {/* Bottom Navigation Bar - Fixed at bottom */}
+      <div className="fixed bottom-0 left-64 right-0 bg-white/90 backdrop-blur-sm border-t border-gray-200 shadow-lg px-6 py-3 z-20">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-6">
+            <button 
+              onClick={() => handleViewModeChange('calendar')}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                viewMode === 'calendar' 
+                  ? 'text-blue-600 bg-blue-50' 
+                  : 'text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              <Calendar className="h-4 w-4" />
+              <span>Calendar View</span>
+            </button>
+            
+            <button 
+              onClick={() => {
+                fetchAllBoards();
+                setShowSwitchBoardsModal(true);
+              }}
+              className="flex items-center space-x-2 px-3 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+            >
+              <Layout className="h-4 w-4" />
+              <span>Switch Boards</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 function CardEditModal({ card, onClose, onSave }) {
   const [title, setTitle] = useState(card.title);
-  const [description, setDescription] = useState(card.description || "");
-  const [dueDate, setDueDate] = useState(card.due_date || "");
-  const [label, setLabel] = useState(card.label || "");
+  const [description, setDescription] = useState(card.description || '');
+  const [labels, setLabels] = useState(card.labels || []);
+  const [dueDate, setDueDate] = useState(card.due_date ? new Date(card.due_date).toISOString().split('T')[0] : '');
+  const [startDate, setStartDate] = useState(card.start_date ? new Date(card.start_date).toISOString().split('T')[0] : '');
+  const [attachments, setAttachments] = useState(card.attachments || []);
+  const [newAttachment, setNewAttachment] = useState('');
+  const [showLabels, setShowLabels] = useState(false);
+  const [showDates, setShowDates] = useState(false);
+  const [showAttachments, setShowAttachments] = useState(false);
+
+  const predefinedLabels = [
+    { id: 1, name: 'High', color: 'bg-red-500' },
+    { id: 2, name: 'Medium', color: 'bg-orange-500' },
+    { id: 3, name: 'Low', color: 'bg-green-500' },
+  ];
 
   const handleSave = async () => {
     const updates = {
       title,
       description,
+      labels: labels.length > 0 ? labels : null,
       due_date: dueDate || null,
-      label,
+      start_date: startDate || null,
+      attachments: attachments.length > 0 ? attachments : null,
     };
 
     // Update in Supabase
@@ -533,62 +686,246 @@ function CardEditModal({ card, onClose, onSave }) {
     onSave(updates);
     onClose();
   };
+
+  const addLabel = (label) => {
+    if (!labels.find(l => l.id === label.id)) {
+      setLabels([...labels, label]);
+    }
+    setShowLabels(false);
+  };
+
+  const removeLabel = (labelId) => {
+    setLabels(labels.filter(l => l.id !== labelId));
+  };
+
+  const addAttachment = () => {
+    if (newAttachment.trim()) {
+      const attachment = {
+        id: Date.now(),
+        url: newAttachment.trim(),
+        timestamp: new Date().toISOString(),
+        type: 'link',
+      };
+      setAttachments([...attachments, attachment]);
+      setNewAttachment('');
+    }
+  };
+
+  const removeAttachment = (attachmentId) => {
+    setAttachments(attachments.filter(a => a.id !== attachmentId));
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="text-xl font-semibold text-gray-900 border-none outline-none focus:ring-0 w-full"
-            placeholder="Enter card title..."
-          />
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
-          >
+          <div className="flex items-center space-x-3">
+            <div className="w-4 h-4 rounded-full border-2 border-gray-300"></div>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="text-xl font-semibold text-gray-900 border-none outline-none focus:ring-0"
+              placeholder="Enter card title..."
+            />
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200">
             <X className="h-5 w-5 text-gray-500" />
           </button>
         </div>
 
+        {/* Action Buttons */}
+        <div className="px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setShowLabels(!showLabels)}
+              className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+            >
+              <Tag className="h-4 w-4" />
+              <span>Labels</span>
+            </button>
+            
+            <button 
+              onClick={() => setShowDates(!showDates)}
+              className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+            >
+              <Clock className="h-4 w-4" />
+              <span>Dates</span>
+            </button>
+            
+            <button 
+              onClick={() => setShowAttachments(!showAttachments)}
+              className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Attachments</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Description */}
         <div className="px-6 py-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Description
-          </label>
+          <div className="flex items-center space-x-2 mb-3">
+            <div className="w-4 h-4 bg-gray-300 rounded"></div>
+            <h3 className="font-medium text-gray-900">Description</h3>
+          </div>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className="w-full h-24 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Add a detailed description..."
+            placeholder="Add a more detailed description..."
           />
         </div>
 
-        <div className="px-6 py-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Due Date
-          </label>
-          <input
-            type="date"
-            value={dueDate ? new Date(dueDate).toISOString().split("T")[0] : ""}
-            onChange={(e) => setDueDate(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
+        {/* Labels Section */}
+        {showLabels && (
+          <div className="px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center space-x-2 mb-3">
+              <Tag className="h-4 w-4 text-gray-600" />
+              <h3 className="font-medium text-gray-900">Labels</h3>
+            </div>
+            
+            {/* Selected Labels */}
+            {labels.length > 0 && (
+              <div className="mb-3">
+                <p className="text-sm text-gray-600 mb-2">Selected Labels:</p>
+                <div className="flex flex-wrap gap-2">
+                  {labels.map((label) => (
+                    <div
+                      key={label.id}
+                      className={`${label.color} text-white px-2 py-1 rounded text-sm flex items-center space-x-1`}
+                    >
+                      <span>{label.name}</span>
+                      <button
+                        onClick={() => removeLabel(label.id)}
+                        className="hover:bg-black/20 rounded-full p-0.5"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Available Labels */}
+            <div>
+              <p className="text-sm text-gray-600 mb-2">Available Labels:</p>
+              <div className="grid grid-cols-2 gap-2">
+                {predefinedLabels.map((label) => (
+                  <button
+                    key={label.id}
+                    onClick={() => addLabel(label)}
+                    disabled={labels.find(l => l.id === label.id)}
+                    className={`${label.color} text-white px-3 py-2 rounded text-sm text-left disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80`}
+                  >
+                    {label.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
-        <div className="px-6 py-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Label
-          </label>
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-            placeholder="Enter label"
-          />
-        </div>
+        {/* Dates Section */}
+        {showDates && (
+          <div className="px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center space-x-2 mb-3">
+              <Clock className="h-4 w-4 text-gray-600" />
+              <h3 className="font-medium text-gray-900">Dates</h3>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={startDate ? new Date(startDate).toISOString().split("T")[0] : ""}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Due Date
+                </label>
+                <input
+                  type="date"
+                  value={dueDate ? new Date(dueDate).toISOString().split("T")[0] : ""}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
+        {/* Attachments Section */}
+        {showAttachments && (
+          <div className="px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center space-x-2 mb-3">
+              <Plus className="h-4 w-4 text-gray-600" />
+              <h3 className="font-medium text-gray-900">Attachments</h3>
+            </div>
+            
+            {/* Add new attachment */}
+            <div className="space-y-2 mb-4">
+              <label className="block text-sm font-medium text-gray-700">
+                Add Link
+              </label>
+              <textarea
+                value={newAttachment}
+                onChange={(e) => setNewAttachment(e.target.value)}
+                placeholder="Paste any link here..."
+                className="w-full h-20 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <button
+                onClick={addAttachment}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+              >
+                Add Attachment
+              </button>
+            </div>
+            
+            {/* Attachments list */}
+            {attachments.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600 mb-2">Attached Links:</p>
+                {attachments.map((attachment) => (
+                  <div key={attachment.id} className="bg-gray-50 rounded-lg p-3">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <a
+                          href={attachment.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 underline break-all"
+                        >
+                          {attachment.url}
+                        </a>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Added {new Date(attachment.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => removeAttachment(attachment.id)}
+                        className="p-1 hover:bg-red-100 rounded text-red-500 ml-2"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Save Button */}
         <div className="px-6 py-4 border-t border-gray-200">
           <button
             onClick={handleSave}
@@ -1246,6 +1583,229 @@ function ExistingMembersModal({ boardId, onClose }) {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Calendar View Component
+function CalendarView({ lists, onCardClick }) {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  // Get all cards with due dates
+  const allCards = lists.flatMap(list => 
+    list.cards
+      .filter(card => card.due_date)
+      .map(card => ({
+        ...card,
+        listName: list.name,
+        dueDate: new Date(card.due_date)
+      }))
+  );
+
+  // Group cards by date
+  const cardsByDate = allCards.reduce((acc, card) => {
+    const dateKey = card.dueDate.toDateString();
+    if (!acc[dateKey]) {
+      acc[dateKey] = [];
+    }
+    acc[dateKey].push(card);
+    return acc;
+  }, {});
+
+  // Get calendar days
+  const getCalendarDays = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDate = new Date(firstDay);
+    startDate.setDate(startDate.getDate() - firstDay.getDay());
+    
+    const days = [];
+    for (let i = 0; i < 42; i++) {
+      const date = new Date(startDate);
+      date.setDate(startDate.getDate() + i);
+      days.push(date);
+    }
+    return days;
+  };
+
+  const days = getCalendarDays();
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const navigateMonth = (direction) => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev);
+      newDate.setMonth(prev.getMonth() + direction);
+      return newDate;
+    });
+  };
+
+  const isToday = (date) => {
+    const today = new Date();
+    return date.toDateString() === today.toDateString();
+  };
+
+  const isCurrentMonth = (date) => {
+    return date.getMonth() === currentDate.getMonth();
+  };
+
+  return (
+    <div className="relative z-10 p-6 pb-20 h-full overflow-y-auto">
+      <div className="bg-white/90 rounded-lg shadow-sm border border-gray-200 p-6">
+        {/* Calendar Header */}
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => navigateMonth(-1)}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          
+          <h2 className="text-xl font-semibold">
+            {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+          </h2>
+          
+          <button
+            onClick={() => navigateMonth(1)}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            <ArrowLeft className="h-5 w-5 rotate-180" />
+          </button>
+        </div>
+
+        {/* Calendar Grid */}
+        <div className="grid grid-cols-7 gap-1 mb-4">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+            <div key={day} className="p-2 text-center text-sm font-medium text-gray-500">
+              {day}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((date, index) => {
+            const dateKey = date.toDateString();
+            const dayCards = cardsByDate[dateKey] || [];
+            
+            return (
+              <div
+                key={index}
+                className={`min-h-[100px] p-2 border border-gray-200 ${
+                  isCurrentMonth(date) ? 'bg-white' : 'bg-gray-50'
+                } ${isToday(date) ? 'ring-2 ring-blue-500' : ''}`}
+              >
+                <div className={`text-sm ${isCurrentMonth(date) ? 'text-gray-900' : 'text-gray-400'}`}>
+                  {date.getDate()}
+                </div>
+                
+                {dayCards.length > 0 && (
+                  <div className="mt-1 space-y-1">
+                    {dayCards.slice(0, 3).map((card, cardIndex) => (
+                      <div
+                        key={cardIndex}
+                        onClick={() => onCardClick(card)}
+                        className="text-xs p-1 bg-blue-100 text-blue-800 rounded cursor-pointer hover:bg-blue-200 truncate"
+                        title={card.title}
+                      >
+                        {card.title}
+                      </div>
+                    ))}
+                    {dayCards.length > 3 && (
+                      <div className="text-xs text-gray-500">
+                        +{dayCards.length - 3} more
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Switch Boards Modal Component
+function SwitchBoardsModal({ boards, currentBoardId, loading, onClose, onBoardSelect, currentUser }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] overflow-hidden">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Switch Boards</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto max-h-[60vh]">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-gray-600">Loading boards...</span>
+            </div>
+          ) : boards.length === 0 ? (
+            <div className="text-center py-8">
+              <Grid3X3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Boards Found</h3>
+              <p className="text-gray-500">You don't have any boards yet.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {boards.map((board) => {
+                // Determine user's role in this board
+                const isOwner = board.user_id === currentUser?.id;
+                const isMember = board.members?.some(member => member.user_id === currentUser?.id) || false;
+                
+                // Debug logging
+                console.log('Board:', board.title, 'user_id:', board.user_id, 'currentUser.id:', currentUser?.id, 'isOwner:', isOwner);
+                
+                const userRole = isOwner ? 'Owner' : isMember ? 'Member' : 'Unknown';
+                
+                return (
+                  <div
+                    key={board.id}
+                    onClick={() => onBoardSelect(board.id)}
+                    className={`relative p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 hover:shadow-md ${
+                      board.id === currentBoardId
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    style={{
+                      backgroundImage: board.background_image ? `url(${board.background_image})` : 'none',
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }}
+                  >
+                    <div className="relative z-10">
+                      <h3 className="font-semibold text-gray-900 mb-2">{board.title}</h3>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-gray-600">
+                          {userRole}
+                        </p>
+                        {board.id === currentBoardId && (
+                          <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                        )}
+                      </div>
+                    </div>
+                    {board.background_image && (
+                      <div className="absolute inset-0 bg-black/20 rounded-lg"></div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

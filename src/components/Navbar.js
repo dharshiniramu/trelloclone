@@ -12,6 +12,9 @@ export default function Navbar() {
   const [currentUser, setCurrentUser] = useState(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editingUsername, setEditingUsername] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
 
   // Load user + profile
   const loadUserAndProfile = useCallback(async () => {
@@ -62,9 +65,122 @@ export default function Navbar() {
     return () => subscription.unsubscribe();
   }, [loadUserAndProfile, router]);
 
+  // Search functionality
+  const searchBoardsAndWorkspaces = useCallback(async (query) => {
+    if (!query.trim() || !currentUser) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      // Search for boards where user is owner or member
+      const { data: ownedBoards, error: ownedError } = await supabase
+        .from("boards")
+        .select("id, title, background_image, user_id")
+        .eq("user_id", currentUser.id)
+        .ilike("title", `%${query}%`);
+
+      if (ownedError) throw ownedError;
+
+      // Search for boards where user is a member
+      const { data: allBoards, error: allBoardsError } = await supabase
+        .from("boards")
+        .select("id, title, background_image, user_id, members")
+        .ilike("title", `%${query}%`);
+
+      if (allBoardsError) throw allBoardsError;
+
+      // Filter member boards
+      const memberBoards = allBoards?.filter(board => {
+        if (board.user_id === currentUser.id) return false; // Skip owned boards
+        const members = board.members || [];
+        return members.some(member => member.user_id === currentUser.id);
+      }) || [];
+
+      // Combine and format results
+      const allResults = [...(ownedBoards || []), ...memberBoards].map(board => ({
+        id: board.id,
+        title: board.title,
+        type: 'board',
+        background_image: board.background_image,
+        isOwner: board.user_id === currentUser.id
+      }));
+
+      // Search for workspaces - filter by user ownership
+      try {
+        const { data: workspaces, error: workspacesError } = await supabase
+          .from("workspaces")
+          .select("id, name, user_id")
+          .eq("user_id", currentUser.id)
+          .ilike("name", `%${query}%`);
+
+        if (!workspacesError && workspaces && workspaces.length > 0) {
+          const workspaceResults = workspaces.map(workspace => ({
+            id: workspace.id,
+            title: workspace.name,
+            type: 'workspace',
+            description: 'Workspace'
+          }));
+          allResults.push(...workspaceResults);
+        }
+      } catch (workspaceError) {
+        console.log('Workspace search error:', workspaceError.message);
+      }
+
+      console.log('Search results:', allResults);
+      setSearchResults(allResults);
+      setShowSearchResults(true);
+    } catch (error) {
+      console.error('Search error:', error.message);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [currentUser]);
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchBoardsAndWorkspaces(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, searchBoardsAndWorkspaces]);
+
   const handleSearch = (e) => {
     e.preventDefault();
-    console.log('Searching for:', searchQuery);
+    if (searchResults.length > 0) {
+      // Navigate to first result
+      const firstResult = searchResults[0];
+      if (firstResult.type === 'board') {
+        router.push(`/board/${firstResult.id}`);
+      } else if (firstResult.type === 'workspace') {
+        router.push(`/workspace`);
+      }
+      setShowSearchResults(false);
+      setSearchQuery('');
+    }
+  };
+
+  const handleResultClick = (result) => {
+    if (result.type === 'board') {
+      router.push(`/board/${result.id}`);
+    } else if (result.type === 'workspace') {
+      router.push(`/workspace`);
+    }
+    setShowSearchResults(false);
+    setSearchQuery('');
+  };
+
+  const handleSearchInputChange = (e) => {
+    setSearchQuery(e.target.value);
+    if (e.target.value.trim()) {
+      setShowSearchResults(true);
+    } else {
+      setShowSearchResults(false);
+    }
   };
 
   // Logout -> clear state -> go to GuestLanding
@@ -128,11 +244,84 @@ export default function Navbar() {
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search boards, cards, or members..."
+                  onChange={handleSearchInputChange}
+                  placeholder="Search boards or workspaces"
                   className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-gray-50 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 hover:bg-white focus:bg-white"
                 />
+                {isSearching && (
+                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  </div>
+                )}
               </form>
+
+              {/* Search Results Dropdown */}
+              {showSearchResults && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                  {searchResults.length > 0 ? (
+                    <div className="py-2">
+                      {searchResults.map((result, index) => (
+                        <button
+                          key={`${result.type}-${result.id}`}
+                          onClick={() => handleResultClick(result)}
+                          className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors duration-200 border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="flex items-center space-x-3">
+                            <div className="flex-shrink-0">
+                              {result.type === 'board' ? (
+                                <div 
+                                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-semibold"
+                                  style={{
+                                    backgroundColor: result.background_image ? 'transparent' : '#3B82F6',
+                                    backgroundImage: result.background_image ? `url(${result.background_image})` : 'none',
+                                    backgroundSize: 'cover',
+                                    backgroundPosition: 'center'
+                                  }}
+                                >
+                                  {!result.background_image && 'B'}
+                                </div>
+                              ) : (
+                                <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center text-white text-sm font-semibold">
+                                  W
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center space-x-2">
+                                <p className="text-sm font-medium text-gray-900 truncate">
+                                  {result.title}
+                                </p>
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  result.type === 'board' 
+                                    ? 'bg-blue-100 text-blue-800' 
+                                    : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {result.type === 'board' ? 'Board' : 'Workspace'}
+                                </span>
+                                {result.type === 'board' && result.isOwner && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                    Owner
+                                  </span>
+                                )}
+                              </div>
+                              {result.description && (
+                                <p className="text-xs text-gray-500 truncate mt-1">
+                                  {result.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-8 text-center">
+                      <Search className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500">No results found for "{searchQuery}"</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Right - Menu Options */}
@@ -217,10 +406,13 @@ export default function Navbar() {
           </div>
         </div>
 
-        {isAccountDropdownOpen && (
+        {(isAccountDropdownOpen || showSearchResults) && (
           <div 
             className="fixed inset-0 z-40" 
-            onClick={() => setIsAccountDropdownOpen(false)}
+            onClick={() => {
+              setIsAccountDropdownOpen(false);
+              setShowSearchResults(false);
+            }}
           />
         )}
       </nav>
