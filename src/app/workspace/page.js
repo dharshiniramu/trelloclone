@@ -1,11 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 import { Plus, X, Building2, Trash } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient"; // 👈 you need to create this file like I showed before
 
 export default function WorkspacePage() {
+  const router = useRouter();
   const [showCreate, setShowCreate] = useState(false);
   const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +76,11 @@ export default function WorkspacePage() {
   }
 };
 
+  // ✅ Navigate to workspace boards
+  const handleWorkspaceClick = (workspaceId) => {
+    router.push(`/workspace/${workspaceId}/boards`);
+  };
+
   return (
     <>
       <Navbar />
@@ -107,8 +114,9 @@ export default function WorkspacePage() {
                 {workspaces.map((workspace, index) => (
   <div
     key={workspace.id}
-    className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200 hover:scale-105 animate-fade-in-up relative"
+    className="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200 hover:scale-105 animate-fade-in-up relative cursor-pointer"
     style={{ animationDelay: `${index * 0.1}s` }}
+    onClick={() => handleWorkspaceClick(workspace.id)}
   >
     {/* Icon */}
     <div className="w-10 h-10 rounded bg-blue-100 flex items-center justify-center mb-3">
