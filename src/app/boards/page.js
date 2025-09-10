@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, FolderOpen, Layout, Trash, X, Star } from "lucide-react";
+import { Plus, FolderOpen, Layout, Trash, X, Star, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 // ✅ Categories with 4 sample images each
@@ -68,6 +68,7 @@ function BoardsContent() {
   ]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
   // Helper function to get user's role in a board
@@ -216,8 +217,12 @@ function BoardsContent() {
       <div className="flex items-center justify-between mb-6 animate-fade-in">
         <h1 className="text-2xl font-bold text-gray-900">Boards</h1>
         <div className="flex items-center gap-3">
-          <button className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-sm">
-            Add members
+          <button 
+            onClick={() => setShowInviteModal(true)}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-sm"
+          >
+            <Users className="h-4 w-4 mr-2" />
+            Invite Members
           </button>
           <button
             onClick={() => setShowCreate(true)}
@@ -313,6 +318,14 @@ function BoardsContent() {
           onCreated={addBoard}
         />
       )}
+
+      {showInviteModal && (
+        <InviteMembersToBoardModal
+          boards={boards}
+          currentUser={currentUser}
+          onClose={() => setShowInviteModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -322,8 +335,9 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
   const [workspaceId, setWorkspaceId] = useState(workspaces?.[0]?.id ?? null);
   const [templateCategory, setTemplateCategory] = useState("personal");
   const [selectedImage, setSelectedImage] = useState(null);
-  const [members, setMembers] = useState("");
+  const [selectedMembers, setSelectedMembers] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   const canSubmit = title.trim().length > 0;
 
@@ -339,7 +353,8 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
         return;
       }
 
-      const { data, error } = await supabase
+      // Create the board first
+      const { data: boardData, error: boardError } = await supabase
         .from("boards")
         .insert([
           {
@@ -353,8 +368,28 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
         .select()
         .single();
 
-      if (error) throw error;
-      onCreated(data);
+      if (boardError) throw boardError;
+
+      // Send invitations if members are selected
+      if (selectedMembers.length > 0) {
+        const invitationsToSend = selectedMembers.map(member => ({
+          board_id: boardData.id,
+          invited_user_id: member.id,
+          invited_by_user_id: user.id,
+          role: 'member'
+        }));
+
+        const { error: invitationError } = await supabase
+          .from("board_invitations")
+          .insert(invitationsToSend);
+
+        if (invitationError) {
+          console.error("Error sending invitations:", invitationError);
+          // Don't fail the board creation if invitations fail
+        }
+      }
+
+      onCreated(boardData);
       onClose();
     } catch (err) {
       console.error("Error creating board:", err.message);
@@ -449,17 +484,48 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           />
         </div>
 
-        {/* Members */}
+        {/* Invite Members */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Add members
+            Invite Members
           </label>
-          <input
-            value={members}
-            onChange={(e) => setMembers(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-            placeholder="Enter emails separated by commas"
-          />
+          <button
+            onClick={() => setShowInviteModal(true)}
+            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-left hover:border-gray-400 flex items-center justify-between"
+          >
+            <span className={selectedMembers.length > 0 ? "text-gray-900" : "text-gray-500"}>
+              {selectedMembers.length > 0 
+                ? `${selectedMembers.length} member${selectedMembers.length !== 1 ? 's' : ''} selected`
+                : "Click to invite members by email or username"
+              }
+            </span>
+            <Users className="h-4 w-4 text-gray-400" />
+          </button>
+          
+          {/* Selected Members Preview */}
+          {selectedMembers.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {selectedMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                >
+                  <div>
+                    <div className="font-medium text-gray-900">{member.username}</div>
+                    {member.email && (
+                      <div className="text-sm text-gray-500">{member.email}</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setSelectedMembers(prev => prev.filter(m => m.id !== member.id))}
+                    className="p-1 hover:bg-red-100 rounded"
+                  >
+                    <X className="h-4 w-4 text-red-500" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <button
@@ -469,6 +535,785 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
         >
           {submitting ? "Creating..." : "Create"}
         </button>
+      </div>
+
+      {/* Invite Members Modal */}
+      {showInviteModal && (
+        <InviteMembersModal
+          selectedMembers={selectedMembers}
+          setSelectedMembers={setSelectedMembers}
+          onClose={() => setShowInviteModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Invite Members Modal Component for Create Board
+function InviteMembersModal({ selectedMembers, setSelectedMembers, onClose }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isOwnerSearch, setIsOwnerSearch] = useState(false);
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        setCurrentUser(user);
+      }
+    };
+    getCurrentUser();
+  }, []);
+
+  // Search for users based on email or username
+  const searchUsers = async (query) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setIsOwnerSearch(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Check if user is searching for themselves
+      if (currentUser) {
+        const { data: currentUserProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .eq("id", currentUser.id)
+          .single();
+
+        if (!profileError && currentUserProfile) {
+          const isSearchingSelf = 
+            currentUserProfile.username?.toLowerCase().includes(query.toLowerCase()) ||
+            currentUserProfile.email?.toLowerCase().includes(query.toLowerCase());
+          
+          if (isSearchingSelf) {
+            setIsOwnerSearch(true);
+            setSearchResults([]);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      setIsOwnerSearch(false);
+
+      // Search for other users - try multiple approaches
+      let profiles = [];
+      let profilesError = null;
+
+      // First, try to search with both username and email
+      const { data: searchResults, error: searchError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
+        .limit(10);
+
+      if (searchError) {
+        // If email column doesn't exist, fallback to username only
+        if (searchError.code === '42703') {
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        } else {
+          // For other errors, try username search only
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        }
+      } else if (searchResults) {
+        profiles = searchResults;
+      }
+
+      // If no results with the OR query, try separate searches
+      if (profiles.length === 0) {
+        // Try username search
+        const { data: usernameResults, error: usernameError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("username", `%${query}%`)
+          .limit(5);
+
+        if (!usernameError && usernameResults) {
+          profiles = [...profiles, ...usernameResults];
+        }
+
+        // Try email search (if email column exists)
+        const { data: emailResults, error: emailError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("email", `%${query}%`)
+          .limit(5);
+
+        if (!emailError && emailResults) {
+          // Merge results, avoiding duplicates
+          const existingIds = profiles.map(p => p.id);
+          const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
+          profiles = [...profiles, ...newEmailResults];
+        }
+      }
+
+      setSearchResults(profiles);
+    } catch (error) {
+      console.error("Error searching users:", error);
+      setSearchResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchUsers(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const handleUserSelect = (user) => {
+    if (!selectedMembers.find(member => member.id === user.id)) {
+      setSelectedMembers([...selectedMembers, user]);
+    }
+    setSearchQuery("");
+    setSearchResults([]);
+    setError(""); // Clear any previous errors
+  };
+
+  const removeSelectedMember = (userId) => {
+    setSelectedMembers(selectedMembers.filter(member => member.id !== userId));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Invite Members</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* Search Input */}
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setError(""); // Clear errors when user starts typing
+              }}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Search by email or username..."
+            />
+            {loading && (
+              <div className="absolute right-3 top-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              </div>
+            )}
+          </div>
+
+          {/* Owner Search Message */}
+          {isOwnerSearch && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  👑
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900">You are the board creator</div>
+                  <div className="text-sm text-blue-700">You don't need to invite yourself!</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Search Results Dropdown */}
+          {searchResults.length > 0 && !isOwnerSearch && (
+            <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
+              {searchResults.map((user) => (
+                <button
+                  key={user.id}
+                  onClick={() => handleUserSelect(user)}
+                  className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {user.username?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {user.username}
+                      </div>
+                      {user.email && (
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* No Results Message */}
+          {searchQuery && searchResults.length === 0 && !loading && !isOwnerSearch && (
+            <div className="p-4 text-center text-gray-500">
+              <div className="text-sm">No users found matching "{searchQuery}"</div>
+              <div className="text-xs text-gray-400 mt-1">Try searching by username or email</div>
+            </div>
+          )}
+
+          {/* Selected Members */}
+          {selectedMembers.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-700">Selected Members:</h3>
+              <div className="space-y-2">
+                {selectedMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900">{member.username}</div>
+                      {member.email && (
+                        <div className="text-sm text-gray-500">{member.email}</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeSelectedMember(member.id)}
+                      className="p-1 hover:bg-red-100 rounded"
+                    >
+                      <X className="h-4 w-4 text-red-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="text-sm text-red-600">{error}</div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Invite Members to Board Modal Component
+function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
+  const [selectedBoard, setSelectedBoard] = useState(null);
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [isOwnerSearch, setIsOwnerSearch] = useState(false);
+
+  // Filter boards where current user is owner
+  const ownedBoards = boards.filter(board => 
+    currentUser && board.user_id === currentUser.id
+  );
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        // User is already passed as prop, but we can use this for consistency
+      }
+    };
+    getCurrentUser();
+  }, []);
+
+  // Search for users based on email or username
+  const searchUsers = async (query) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setIsOwnerSearch(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Check if user is searching for themselves
+      if (currentUser) {
+        const { data: currentUserProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .eq("id", currentUser.id)
+          .single();
+
+        if (!profileError && currentUserProfile) {
+          const isSearchingSelf = 
+            currentUserProfile.username?.toLowerCase().includes(query.toLowerCase()) ||
+            currentUserProfile.email?.toLowerCase().includes(query.toLowerCase());
+          
+          if (isSearchingSelf) {
+            setIsOwnerSearch(true);
+            setSearchResults([]);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      setIsOwnerSearch(false);
+
+      // Search for other users - try multiple approaches
+      let profiles = [];
+      let profilesError = null;
+
+      // First, try to search with both username and email
+      const { data: searchResults, error: searchError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
+        .limit(10);
+
+      if (searchError) {
+        // If email column doesn't exist, fallback to username only
+        if (searchError.code === '42703') {
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        } else {
+          // For other errors, try username search only
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        }
+      } else if (searchResults) {
+        profiles = searchResults;
+      }
+
+      // If no results with the OR query, try separate searches
+      if (profiles.length === 0) {
+        // Try username search
+        const { data: usernameResults, error: usernameError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("username", `%${query}%`)
+          .limit(5);
+
+        if (!usernameError && usernameResults) {
+          profiles = [...profiles, ...usernameResults];
+        }
+
+        // Try email search (if email column exists)
+        const { data: emailResults, error: emailError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("email", `%${query}%`)
+          .limit(5);
+
+        if (!emailError && emailResults) {
+          // Merge results, avoiding duplicates
+          const existingIds = profiles.map(p => p.id);
+          const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
+          profiles = [...profiles, ...newEmailResults];
+        }
+      }
+
+      setSearchResults(profiles);
+    } catch (error) {
+      console.error("Error searching users:", error);
+      setSearchResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchUsers(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const handleUserSelect = (user) => {
+    if (!selectedMembers.find(member => member.id === user.id)) {
+      setSelectedMembers([...selectedMembers, user]);
+    }
+    setSearchQuery("");
+    setSearchResults([]);
+    setError(""); // Clear any previous errors
+  };
+
+  const removeSelectedMember = (userId) => {
+    setSelectedMembers(selectedMembers.filter(member => member.id !== userId));
+  };
+
+  const addMembersToBoard = async () => {
+    if (selectedMembers.length === 0 || !selectedBoard) return;
+
+    setAdding(true);
+    setError("");
+    setSuccess("");
+    
+    try {
+      // Get current user to check permissions
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        setError("You must be logged in to invite members.");
+        return;
+      }
+
+      // Verify user is the owner of the selected board
+      if (selectedBoard.user_id !== user.id) {
+        setError("You can only invite members to boards you own.");
+        return;
+      }
+
+      // Get current board data to check existing members and invitations
+      const { data: boardData, error: boardError } = await supabase
+        .from("boards")
+        .select("members, title")
+        .eq("id", selectedBoard.id)
+        .single();
+
+      if (boardError) {
+        setError("Failed to fetch board data.");
+        return;
+      }
+
+      // Get existing members array
+      const existingMembers = boardData.members || [];
+      
+      // Check for existing invitations
+      const { data: existingInvitations, error: invitationsError } = await supabase
+        .from("board_invitations")
+        .select("invited_user_id, status")
+        .eq("board_id", selectedBoard.id)
+        .in("invited_user_id", selectedMembers.map(m => m.id));
+
+      if (invitationsError) {
+        console.error("Error checking existing invitations:", invitationsError);
+      }
+
+      // Separate checks for existing members and pending invitations
+      const alreadyMembers = selectedMembers.filter(selectedMember => 
+        existingMembers.some(existingMember => 
+          existingMember.user_id === selectedMember.id
+        )
+      );
+      
+      const hasPendingInvitations = selectedMembers.filter(selectedMember => 
+        existingInvitations?.some(invitation => 
+          invitation.invited_user_id === selectedMember.id && invitation.status === 'pending'
+        )
+      );
+
+      // Show specific alert for existing members
+      if (alreadyMembers.length > 0) {
+        const memberNames = alreadyMembers.map(member => member.username).join(', ');
+        setError(`${memberNames} ${alreadyMembers.length === 1 ? 'is' : 'are'} already a member${alreadyMembers.length === 1 ? '' : 's'} of this board.`);
+        return;
+      }
+
+      // Show specific alert for pending invitations
+      if (hasPendingInvitations.length > 0) {
+        const invitationNames = hasPendingInvitations.map(member => member.username).join(', ');
+        setError(`${invitationNames} ${hasPendingInvitations.length === 1 ? 'has' : 'have'} pending invitation${hasPendingInvitations.length === 1 ? '' : 's'} for this board.`);
+        return;
+      }
+
+      // Filter out users who are already members or have pending invitations
+      const newInvitations = selectedMembers.filter(selectedMember => {
+        const isAlreadyMember = existingMembers.some(existingMember => 
+          existingMember.user_id === selectedMember.id
+        );
+        const hasPendingInvitation = existingInvitations?.some(invitation => 
+          invitation.invited_user_id === selectedMember.id && invitation.status === 'pending'
+        );
+        return !isAlreadyMember && !hasPendingInvitation;
+      });
+
+      if (newInvitations.length === 0) {
+        setError("All selected users are already members or have pending invitations for this board.");
+        return;
+      }
+
+      // Create invitation objects
+      const invitationsToSend = newInvitations.map(member => ({
+        board_id: parseInt(selectedBoard.id),
+        invited_user_id: member.id,
+        invited_by_user_id: user.id,
+        role: 'member'
+      }));
+
+      // Send invitations
+      const { data, error } = await supabase
+        .from("board_invitations")
+        .insert(invitationsToSend)
+        .select();
+
+      if (error) {
+        console.error("Error sending invitations:", error);
+        setError(`Failed to send invitations: ${error.message || 'Unknown error occurred'}`);
+        return;
+      }
+
+      // Success
+      setSuccess(`Successfully sent ${invitationsToSend.length} invitation${invitationsToSend.length !== 1 ? 's' : ''} to join "${boardData.title}"!`);
+      
+      // Reset state and close modal after a short delay
+      setTimeout(() => {
+        setSelectedMembers([]);
+        setSearchQuery("");
+        setSearchResults([]);
+        setSuccess("");
+        onClose();
+      }, 1500);
+
+    } catch (error) {
+      console.error("Error sending invitations:", error);
+      setError(`Unexpected error: ${error.message}`);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Invite Members to Board</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* Board Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Board <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={selectedBoard?.id || ""}
+              onChange={(e) => {
+                const boardId = e.target.value;
+                const board = ownedBoards.find(b => b.id.toString() === boardId);
+                setSelectedBoard(board || null);
+                setError(""); // Clear errors when board changes
+              }}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Choose a board...</option>
+              {ownedBoards.map((board) => (
+                <option key={board.id} value={board.id}>
+                  {board.title}
+                </option>
+              ))}
+            </select>
+            {ownedBoards.length === 0 && (
+              <p className="text-sm text-gray-500 mt-1">
+                You don't own any boards yet. Create a board first to invite members.
+              </p>
+            )}
+          </div>
+
+          {/* Search Input */}
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setError(""); // Clear errors when user starts typing
+              }}
+              disabled={!selectedBoard}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              placeholder={selectedBoard ? "Search by email or username..." : "Select a board first..."}
+            />
+            {loading && (
+              <div className="absolute right-3 top-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              </div>
+            )}
+          </div>
+
+          {/* Owner Search Message */}
+          {isOwnerSearch && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  👑
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900">You are the owner of this board</div>
+                  <div className="text-sm text-blue-700">You don't need to invite yourself!</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Search Results Dropdown */}
+          {searchResults.length > 0 && !isOwnerSearch && selectedBoard && (
+            <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
+              {searchResults.map((user) => (
+                <button
+                  key={user.id}
+                  onClick={() => handleUserSelect(user)}
+                  className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {user.username?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {user.username}
+                      </div>
+                      {user.email && (
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* No Results Message */}
+          {searchQuery && searchResults.length === 0 && !loading && !isOwnerSearch && selectedBoard && (
+            <div className="p-4 text-center text-gray-500">
+              <div className="text-sm">No users found matching "{searchQuery}"</div>
+              <div className="text-xs text-gray-400 mt-1">Try searching by username or email</div>
+            </div>
+          )}
+
+          {/* Selected Members */}
+          {selectedMembers.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-700">Selected Members:</h3>
+              <div className="space-y-2">
+                {selectedMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900">{member.username}</div>
+                      {member.email && (
+                        <div className="text-sm text-gray-500">{member.email}</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeSelectedMember(member.id)}
+                      className="p-1 hover:bg-red-100 rounded"
+                    >
+                      <X className="h-4 w-4 text-red-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <div className={`p-3 rounded-lg ${
+              error.includes('already a member') 
+                ? 'bg-orange-50 border border-orange-200' 
+                : 'bg-red-50 border border-red-200'
+            }`}>
+              <div className={`text-sm ${
+                error.includes('already a member') 
+                  ? 'text-orange-600' 
+                  : 'text-red-600'
+              }`}>
+                {error.includes('already a member') && (
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="w-4 h-4 bg-orange-500 rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <span className="font-medium">Member Already Exists</span>
+                  </div>
+                )}
+                {error}
+              </div>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {success && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+              <div className="text-sm text-green-600">{success}</div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={addMembersToBoard}
+              disabled={selectedMembers.length === 0 || !selectedBoard || adding}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+            >
+              {adding ? "Sending..." : `Send ${selectedMembers.length} Invitation${selectedMembers.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
