@@ -1763,6 +1763,33 @@ function AddMembersModal({ boardId, onClose }) {
         console.error("Error checking existing invitations:", invitationsError);
       }
 
+      // Separate checks for existing members and pending invitations
+      const alreadyMembers = selectedMembers.filter(selectedMember => 
+        existingMembers.some(existingMember => 
+          existingMember.user_id === selectedMember.id
+        )
+      );
+      
+      const hasPendingInvitations = selectedMembers.filter(selectedMember => 
+        existingInvitations?.some(invitation => 
+          invitation.invited_user_id === selectedMember.id && invitation.status === 'pending'
+        )
+      );
+
+      // Show specific alert for existing members
+      if (alreadyMembers.length > 0) {
+        const memberNames = alreadyMembers.map(member => member.username).join(', ');
+        setError(`${memberNames} ${alreadyMembers.length === 1 ? 'is' : 'are'} already a member${alreadyMembers.length === 1 ? '' : 's'} of this board.`);
+        return;
+      }
+
+      // Show specific alert for pending invitations
+      if (hasPendingInvitations.length > 0) {
+        const invitationNames = hasPendingInvitations.map(member => member.username).join(', ');
+        setError(`${invitationNames} ${hasPendingInvitations.length === 1 ? 'has' : 'have'} pending invitation${hasPendingInvitations.length === 1 ? '' : 's'} for this board.`);
+        return;
+      }
+
       // Filter out users who are already members or have pending invitations
       const newInvitations = selectedMembers.filter(selectedMember => {
         const isAlreadyMember = existingMembers.some(existingMember => 
@@ -1960,8 +1987,26 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* Error Message */}
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="text-sm text-red-600">{error}</div>
+            <div className={`p-3 rounded-lg ${
+              error.includes('already a member') 
+                ? 'bg-orange-50 border border-orange-200' 
+                : 'bg-red-50 border border-red-200'
+            }`}>
+              <div className={`text-sm ${
+                error.includes('already a member') 
+                  ? 'text-orange-600' 
+                  : 'text-red-600'
+              }`}>
+                {error.includes('already a member') && (
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="w-4 h-4 bg-orange-500 rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <span className="font-medium">Member Already Exists</span>
+                  </div>
+                )}
+                {error}
+              </div>
             </div>
           )}
 

@@ -71,7 +71,8 @@ export default function Home() {
 }
 
 function AuthenticatedHome({ username }) {
-  const [invitations, setInvitations] = useState([]);
+  const [boardInvitations, setBoardInvitations] = useState([]);
+  const [workspaceInvitations, setWorkspaceInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [tableError, setTableError] = useState(false);
@@ -83,8 +84,8 @@ function AuthenticatedHome({ username }) {
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (userError || !user) return;
 
-        // Get pending invitations for the current user
-        const { data: invitationsData, error: invitationsError } = await supabase
+        // Fetch board invitations
+        const { data: boardInvitationsData, error: boardInvitationsError } = await supabase
           .from("board_invitations")
           .select(`
             id,
@@ -98,52 +99,72 @@ function AuthenticatedHome({ username }) {
           .eq("status", "pending")
           .order("created_at", { ascending: false });
 
-        if (invitationsError) {
-          console.error("Error fetching invitations:", invitationsError);
-          console.error("Error details:", {
-            code: invitationsError.code,
-            message: invitationsError.message,
-            details: invitationsError.details,
-            hint: invitationsError.hint
-          });
-          
-          // If table doesn't exist, show error state
-          if (invitationsError.code === '42P01') {
+        // Fetch workspace invitations
+        const { data: workspaceInvitationsData, error: workspaceInvitationsError } = await supabase
+          .from("workspace_invitations")
+          .select(`
+            id,
+            workspace_id,
+            role,
+            created_at,
+            invited_by_user_id,
+            workspaces(name)
+          `)
+          .eq("invited_user_id", user.id)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+
+        // Handle board invitations
+        if (boardInvitationsError) {
+          console.error("Error fetching board invitations:", boardInvitationsError);
+          if (boardInvitationsError.code === '42P01') {
             console.log("board_invitations table doesn't exist yet. Run the setup SQL script.");
-            setTableError(true);
-            setInvitations([]);
-            return;
           }
-          
-          // For other errors, still show empty state
-          setInvitations([]);
-          return;
+          setBoardInvitations([]);
+        } else {
+          setBoardInvitations(boardInvitationsData || []);
         }
 
-        // Get usernames for the inviters
-        if (invitationsData && invitationsData.length > 0) {
-          const inviterIds = [...new Set(invitationsData.map(inv => inv.invited_by_user_id))];
+        // Handle workspace invitations
+        if (workspaceInvitationsError) {
+          console.error("Error fetching workspace invitations:", workspaceInvitationsError);
+          if (workspaceInvitationsError.code === '42P01') {
+            console.log("workspace_invitations table doesn't exist yet. Run the setup SQL script.");
+          }
+          setWorkspaceInvitations([]);
+        } else {
+          setWorkspaceInvitations(workspaceInvitationsData || []);
+        }
+
+        // Get usernames for all inviters
+        const allInvitations = [...(boardInvitationsData || []), ...(workspaceInvitationsData || [])];
+        if (allInvitations.length > 0) {
+          const inviterIds = [...new Set(allInvitations.map(inv => inv.invited_by_user_id))];
           const { data: profiles, error: profilesError } = await supabase
             .from("profiles")
             .select("id, username")
             .in("id", inviterIds);
 
           if (!profilesError && profiles) {
-            // Add usernames to invitations
-            const invitationsWithUsernames = invitationsData.map(invitation => ({
+            // Add usernames to board invitations
+            const boardInvitationsWithUsernames = (boardInvitationsData || []).map(invitation => ({
               ...invitation,
               inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
             }));
-            setInvitations(invitationsWithUsernames);
-          } else {
-            setInvitations(invitationsData);
+            setBoardInvitations(boardInvitationsWithUsernames);
+
+            // Add usernames to workspace invitations
+            const workspaceInvitationsWithUsernames = (workspaceInvitationsData || []).map(invitation => ({
+              ...invitation,
+              inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
+            }));
+            setWorkspaceInvitations(workspaceInvitationsWithUsernames);
           }
-        } else {
-          setInvitations(invitationsData || []);
         }
       } catch (error) {
         console.error("Error fetching invitations:", error);
-        setInvitations([]);
+        setBoardInvitations([]);
+        setWorkspaceInvitations([]);
       } finally {
         setLoading(false);
       }
@@ -152,32 +173,55 @@ function AuthenticatedHome({ username }) {
     fetchInvitations();
   }, []);
 
-  const handleInvitationResponse = async (invitationId, action) => {
+  const handleInvitationResponse = async (invitationId, action, type) => {
     setProcessing(invitationId);
     try {
       if (action === 'accept') {
-        // Use the database function to accept invitation
-        const { data, error } = await supabase.rpc('accept_board_invitation', {
-          invitation_id: invitationId
-        });
+        if (type === 'board') {
+          // Use the database function to accept board invitation
+          const { data, error } = await supabase.rpc('accept_board_invitation', {
+            invitation_id: invitationId
+          });
 
-        if (error) {
-          console.error("Error accepting invitation:", error);
-          alert("Failed to accept invitation. Please try again.");
-          return;
-        }
+          if (error) {
+            console.error("Error accepting board invitation:", error);
+            alert("Failed to accept invitation. Please try again.");
+            return;
+          }
 
-        if (data) {
-          // Remove the invitation from the list
-          setInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-          alert("Successfully joined the board!");
-        } else {
-          alert("Failed to accept invitation. It may have already been processed.");
+          if (data) {
+            // Remove the invitation from the list
+            setBoardInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+            alert("Successfully joined the board!");
+          } else {
+            alert("Failed to accept invitation. It may have already been processed.");
+          }
+        } else if (type === 'workspace') {
+          // Use the database function to accept workspace invitation
+          const { data, error } = await supabase.rpc('accept_workspace_invitation', {
+            invitation_id: invitationId
+          });
+
+          if (error) {
+            console.error("Error accepting workspace invitation:", error);
+            alert("Failed to accept invitation. Please try again.");
+            return;
+          }
+
+          if (data) {
+            // Remove the invitation from the list
+            setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+            alert("Successfully joined the workspace!");
+          } else {
+            alert("Failed to accept invitation. It may have already been processed.");
+          }
         }
       } else if (action === 'decline') {
+        const tableName = type === 'board' ? 'board_invitations' : 'workspace_invitations';
+        
         // Update invitation status to declined
         const { error } = await supabase
-          .from("board_invitations")
+          .from(tableName)
           .update({ 
             status: 'declined',
             responded_at: new Date().toISOString()
@@ -190,8 +234,12 @@ function AuthenticatedHome({ username }) {
           return;
         }
 
-        // Remove the invitation from the list
-        setInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+        // Remove the invitation from the appropriate list
+        if (type === 'board') {
+          setBoardInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+        } else {
+          setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+        }
         alert("Invitation declined.");
       }
     } catch (error) {
@@ -235,7 +283,7 @@ function AuthenticatedHome({ username }) {
                 Run the SQL script from setup_board_members_table.sql in your Supabase SQL Editor
               </div>
             </div>
-          ) : invitations.length === 0 ? (
+          ) : (boardInvitations.length === 0 && workspaceInvitations.length === 0) ? (
             <div className="bg-white border border-gray-200 rounded-xl p-10 text-center animate-fade-in-up">
               <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
                 <Bell className="h-7 w-7 text-blue-600" />
@@ -244,64 +292,132 @@ function AuthenticatedHome({ username }) {
                 No notifications yet
               </p>
               <p className="text-gray-500">
-                You'll see board invitations and updates here when there's activity.
+                You'll see board and workspace invitations here when there's activity.
               </p>
             </div>
           ) : (
-            <div className="space-y-4 animate-fade-in-up">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Board Invitations ({invitations.length})
-              </h2>
-              {invitations.map((invitation) => (
-                <div
-                  key={invitation.id}
-                  className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start space-x-4">
-                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <Mail className="h-6 w-6 text-blue-600" />
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                          Board Invitation
-                        </h3>
-                        <p className="text-gray-600 mb-2">
-                          <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> invited you to join the board{' '}
-                          <span className="font-medium text-blue-600">"{invitation.boards?.title}"</span>
-                        </p>
-                        <div className="flex items-center space-x-4 text-sm text-gray-500">
-                          <span>Role: {invitation.role}</span>
-                          <span>•</span>
-                          <span>{new Date(invitation.created_at).toLocaleDateString()}</span>
+            <div className="space-y-6 animate-fade-in-up">
+              {/* Board Invitations */}
+              {boardInvitations.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                    Board Invitations ({boardInvitations.length})
+                  </h2>
+                  <div className="space-y-4">
+                    {boardInvitations.map((invitation) => (
+                      <div
+                        key={`board-${invitation.id}`}
+                        className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start space-x-4">
+                            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                              <Mail className="h-6 w-6 text-blue-600" />
+                            </div>
+                            <div className="flex-1">
+                              <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                Board Invitation
+                              </h3>
+                              <p className="text-gray-600 mb-2">
+                                <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> invited you to join the board{' '}
+                                <span className="font-medium text-blue-600">"{invitation.boards?.title}"</span>
+                              </p>
+                              <div className="flex items-center space-x-4 text-sm text-gray-500">
+                                <span>Role: {invitation.role}</span>
+                                <span>•</span>
+                                <span>{new Date(invitation.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => handleInvitationResponse(invitation.id, 'accept', 'board')}
+                              disabled={processing === invitation.id}
+                              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            >
+                              {processing === invitation.id ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              ) : (
+                                <Check className="h-4 w-4 mr-2" />
+                              )}
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleInvitationResponse(invitation.id, 'decline', 'board')}
+                              disabled={processing === invitation.id}
+                              className="flex items-center px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            >
+                              <X className="h-4 w-4 mr-2" />
+                              Decline
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleInvitationResponse(invitation.id, 'accept')}
-                        disabled={processing === invitation.id}
-                        className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                      >
-                        {processing === invitation.id ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        ) : (
-                          <Check className="h-4 w-4 mr-2" />
-                        )}
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => handleInvitationResponse(invitation.id, 'decline')}
-                        disabled={processing === invitation.id}
-                        className="flex items-center px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                      >
-                        <X className="h-4 w-4 mr-2" />
-                        Decline
-                      </button>
-                    </div>
+                    ))}
                   </div>
                 </div>
-              ))}
+              )}
+
+              {/* Workspace Invitations */}
+              {workspaceInvitations.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                    Workspace Invitations ({workspaceInvitations.length})
+                  </h2>
+                  <div className="space-y-4">
+                    {workspaceInvitations.map((invitation) => (
+                      <div
+                        key={`workspace-${invitation.id}`}
+                        className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start space-x-4">
+                            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                              <Users className="h-6 w-6 text-green-600" />
+                            </div>
+                            <div className="flex-1">
+                              <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                                Workspace Invitation
+                              </h3>
+                              <p className="text-gray-600 mb-2">
+                                <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> invited you to join the workspace{' '}
+                                <span className="font-medium text-green-600">"{invitation.workspaces?.name}"</span>
+                              </p>
+                              <div className="flex items-center space-x-4 text-sm text-gray-500">
+                                <span>Role: {invitation.role}</span>
+                                <span>•</span>
+                                <span>{new Date(invitation.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => handleInvitationResponse(invitation.id, 'accept', 'workspace')}
+                              disabled={processing === invitation.id}
+                              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            >
+                              {processing === invitation.id ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              ) : (
+                                <Check className="h-4 w-4 mr-2" />
+                              )}
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleInvitationResponse(invitation.id, 'decline', 'workspace')}
+                              disabled={processing === invitation.id}
+                              className="flex items-center px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            >
+                              <X className="h-4 w-4 mr-2" />
+                              Decline
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
