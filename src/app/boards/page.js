@@ -369,18 +369,40 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [error, setError] = useState("");
 
   const canSubmit = title.trim().length > 0;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
+    setError(""); // Clear any previous errors
 
     try {
       // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
         console.error("Error getting user:", userError);
+        return;
+      }
+
+      // Check if board title already exists for this user
+      const { data: existingBoards, error: checkError } = await supabase
+        .from("boards")
+        .select("id, title")
+        .eq("user_id", user.id)
+        .ilike("title", title.trim());
+
+      if (checkError) throw checkError;
+
+      // Check if any existing board has the exact same title (case-insensitive)
+      const duplicateBoard = existingBoards?.find(board => 
+        board.title.toLowerCase() === title.trim().toLowerCase()
+      );
+
+      if (duplicateBoard) {
+        setError("Board title already exists. Please choose a different title.");
+        setSubmitting(false);
         return;
       }
 
@@ -509,10 +531,20 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           </label>
           <input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setError(""); // Clear error when user starts typing
+            }}
+            className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+              error ? "border-red-500" : ""
+            }`}
             placeholder="Enter board title"
           />
+          {error && (
+            <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="text-sm text-red-600">{error}</div>
+            </div>
+          )}
         </div>
 
         {/* Invite Members */}
@@ -586,12 +618,14 @@ function EditBoardModal({ board, workspaces, onClose, onUpdated }) {
   const [templateCategory, setTemplateCategory] = useState("personal");
   const [selectedImage, setSelectedImage] = useState(board?.background_image || null);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   const canSubmit = title.trim().length > 0;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
+    setError(""); // Clear any previous errors
 
     try {
       // Get current user
@@ -605,6 +639,27 @@ function EditBoardModal({ board, workspaces, onClose, onUpdated }) {
       if (board.user_id !== user.id) {
         console.error("Only board owners can edit boards");
         alert("Only board owners can edit boards");
+        return;
+      }
+
+      // Check if board title already exists for this user (excluding current board)
+      const { data: existingBoards, error: checkError } = await supabase
+        .from("boards")
+        .select("id, title")
+        .eq("user_id", user.id)
+        .neq("id", board.id) // Exclude current board from check
+        .ilike("title", title.trim());
+
+      if (checkError) throw checkError;
+
+      // Check if any existing board has the exact same title (case-insensitive)
+      const duplicateBoard = existingBoards?.find(existingBoard => 
+        existingBoard.title.toLowerCase() === title.trim().toLowerCase()
+      );
+
+      if (duplicateBoard) {
+        setError("Board title already exists. Please choose a different title.");
+        setSubmitting(false);
         return;
       }
 
@@ -710,10 +765,20 @@ function EditBoardModal({ board, workspaces, onClose, onUpdated }) {
           </label>
           <input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setError(""); // Clear error when user starts typing
+            }}
+            className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+              error ? "border-red-500" : ""
+            }`}
             placeholder="Enter board title"
           />
+          {error && (
+            <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="text-sm text-red-600">{error}</div>
+            </div>
+          )}
         </div>
 
         <button
