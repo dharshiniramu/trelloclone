@@ -333,7 +333,10 @@ export default function Navbar() {
                 How to use
               </Link>
 
-              <button className="relative text-gray-600 hover:text-gray-900 p-2 rounded-md transition-all duration-200 hover:bg-gray-50 hover:shadow-sm">
+              <button 
+                onClick={() => router.push('/')}
+                className="relative text-gray-600 hover:text-gray-900 p-2 rounded-md transition-all duration-200 hover:bg-gray-50 hover:shadow-sm"
+              >
                 <Bell className="h-5 w-5" />
                 <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-400 ring-2 ring-white animate-pulse"></span>
               </button>
@@ -370,20 +373,7 @@ export default function Navbar() {
                         <Edit className="h-4 w-4 mr-3 text-gray-400" />
                         Edit Profile
                       </button>
-                      <Link 
-                        href="/help" 
-                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all duration-200 hover:text-blue-600"
-                      >
-                        <HelpCircle className="h-4 w-4 mr-3 text-gray-400" />
-                        Help
-                      </Link>
-                      <Link 
-                        href="/workspace" 
-                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-all duration-200 hover:text-blue-600"
-                      >
-                        <Plus className="h-4 w-4 mr-3 text-gray-400" />
-                        Create Workspace
-                      </Link>
+                      
                       
                       <div className="border-t border-gray-100 my-1"></div>
                       <button
