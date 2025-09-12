@@ -15,6 +15,8 @@ export default function Navbar() {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
+  const [hasUnviewedNotifications, setHasUnviewedNotifications] = useState(false);
 
   // Load user + profile
   const loadUserAndProfile = useCallback(async () => {
@@ -22,6 +24,8 @@ export default function Navbar() {
     const user = session?.user;
     if (!user) {
       setCurrentUser(null);
+      setNotificationCount(0);
+      setHasUnviewedNotifications(false);
       return;
     }
 
@@ -41,7 +45,71 @@ export default function Navbar() {
       email: user.email ?? '',
       name: profile?.username || 'Account',
     });
+
+    // Fetch notification count
+    await fetchNotificationCount(user.id);
   }, []);
+
+  // Fetch pending invitations count
+  const fetchNotificationCount = useCallback(async (userId) => {
+    try {
+      // Check if user has viewed notifications recently (within last 5 minutes)
+      const lastViewed = localStorage.getItem(`notifications_viewed_${userId}`);
+      const now = new Date().getTime();
+      const fiveMinutesAgo = now - (5 * 60 * 1000);
+      const hasViewedRecently = lastViewed && parseInt(lastViewed) > fiveMinutesAgo;
+
+      // Fetch board invitations
+      const { data: boardInvitations, error: boardError } = await supabase
+        .from("board_invitations")
+        .select("id, created_at")
+        .eq("invited_user_id", userId)
+        .eq("status", "pending");
+
+      // Fetch workspace invitations
+      const { data: workspaceInvitations, error: workspaceError } = await supabase
+        .from("workspace_invitations")
+        .select("id, created_at")
+        .eq("invited_user_id", userId)
+        .eq("status", "pending");
+
+      if (boardError || workspaceError) {
+        console.error("Error fetching notifications:", boardError || workspaceError);
+        return;
+      }
+
+      const totalCount = (boardInvitations?.length || 0) + (workspaceInvitations?.length || 0);
+      setNotificationCount(totalCount);
+
+      // Check if there are unviewed notifications
+      if (totalCount > 0) {
+        if (!hasViewedRecently) {
+          setHasUnviewedNotifications(true);
+        } else {
+          // Check if there are new notifications since last view
+          const lastViewedTime = lastViewed ? new Date(parseInt(lastViewed)) : new Date(0);
+          const hasNewNotifications = [
+            ...(boardInvitations || []),
+            ...(workspaceInvitations || [])
+          ].some(invitation => new Date(invitation.created_at) > lastViewedTime);
+          
+          setHasUnviewedNotifications(hasNewNotifications);
+        }
+      } else {
+        setHasUnviewedNotifications(false);
+      }
+    } catch (error) {
+      console.error("Error fetching notification count:", error);
+    }
+  }, []);
+
+  // Mark notifications as viewed
+  const markNotificationsAsViewed = useCallback(() => {
+    if (currentUser?.id) {
+      localStorage.setItem(`notifications_viewed_${currentUser.id}`, new Date().getTime().toString());
+      setHasUnviewedNotifications(false);
+    }
+  }, [currentUser?.id]);
 
   useEffect(() => {
     // Initial fetch
@@ -53,6 +121,8 @@ export default function Navbar() {
       if (!user) {
         setCurrentUser(null);
         setIsAccountDropdownOpen(false);
+        setNotificationCount(0);
+        setHasUnviewedNotifications(false);
         // Ensure guest landing after logout from anywhere
         router.push('/');
         router.refresh();
@@ -64,6 +134,32 @@ export default function Navbar() {
 
     return () => subscription.unsubscribe();
   }, [loadUserAndProfile, router]);
+
+  // Refresh notification count periodically and on page focus
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const refreshNotifications = () => {
+      fetchNotificationCount(currentUser.id);
+    };
+
+    // Refresh every 30 seconds
+    const interval = setInterval(refreshNotifications, 30000);
+
+    // Refresh when page becomes visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshNotifications();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentUser?.id, fetchNotificationCount]);
 
   // Search functionality
   const searchBoardsAndWorkspaces = useCallback(async (query) => {
@@ -181,6 +277,12 @@ export default function Navbar() {
     } else {
       setShowSearchResults(false);
     }
+  };
+
+  // Handle notification bell click
+  const handleNotificationClick = () => {
+    markNotificationsAsViewed();
+    router.push('/');
   };
 
   // Logout -> clear state -> go to GuestLanding
@@ -334,11 +436,18 @@ export default function Navbar() {
               </Link>
 
               <button 
-                onClick={() => router.push('/')}
+                onClick={handleNotificationClick}
                 className="relative text-gray-600 hover:text-gray-900 p-2 rounded-md transition-all duration-200 hover:bg-gray-50 hover:shadow-sm"
               >
                 <Bell className="h-5 w-5" />
-                <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-400 ring-2 ring-white animate-pulse"></span>
+                {hasUnviewedNotifications && (
+                  <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white animate-pulse"></span>
+                )}
+                {notificationCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium">
+                    {notificationCount > 9 ? '9+' : notificationCount}
+                  </span>
+                )}
               </button>
 
               {/* Account Dropdown */}
