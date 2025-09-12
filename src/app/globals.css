@@ -45,33 +45,33 @@
   }
 }
 
-/* Animation utility classes */
+/* Animation utility classes - Optimized for faster transitions */
 .animate-fade-in {
-  animation: fadeIn 0.6s ease-out;
+  animation: fadeIn 0.2s ease-out;
 }
 
 .animate-fade-in-up {
-  animation: fadeInUp 0.6s ease-out;
+  animation: fadeInUp 0.2s ease-out;
 }
 
 .animate-slide-in-left {
-  animation: slideInLeft 0.6s ease-out;
+  animation: slideInLeft 0.2s ease-out;
 }
 
 .animate-slide-in-right {
-  animation: slideInRight 0.6s ease-out;
+  animation: slideInRight 0.2s ease-out;
 }
 
-/* Smooth page transitions */
+/* Optimized page transitions - Faster */
 .page-transition-enter {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(5px);
 }
 
 .page-transition-enter-active {
   opacity: 1;
   transform: translateY(0);
-  transition: opacity 300ms, transform 300ms;
+  transition: opacity 150ms, transform 150ms;
 }
 
 .page-transition-exit {
@@ -81,13 +81,14 @@
 
 .page-transition-exit-active {
   opacity: 0;
-  transform: translateY(-10px);
-  transition: opacity 300ms, transform 300ms;
+  transform: translateY(-5px);
+  transition: opacity 150ms, transform 150ms;
 }
 
-/* Enhanced hover effects */
+/* Optimized hover effects - Faster transitions */
 .hover-lift {
-  transition: all 0.2s ease-in-out;
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+  will-change: transform, box-shadow;
 }
 
 .hover-lift:hover {
