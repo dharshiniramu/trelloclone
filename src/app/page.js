@@ -29,7 +29,10 @@ export default function Home() {
           error: userError,
         } = await supabase.auth.getUser();
 
+        console.log('Home page auth check:', { user: !!user, userError });
+
         if (userError || !user) {
+          console.log('No authenticated user, showing guest landing');
           setIsAuth(false);
           return;
         }
@@ -48,6 +51,7 @@ export default function Home() {
           setProfile(profileData);
         }
 
+        console.log('User authenticated, showing authenticated home');
         setIsAuth(true);
       } catch (err) {
         console.error('Error fetching user:', err);
@@ -56,12 +60,32 @@ export default function Home() {
     };
 
     fetchUser();
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('Auth state changed:', event, !!session);
+      if (event === 'SIGNED_IN' && session) {
+        fetchUser();
+      } else if (event === 'SIGNED_OUT') {
+        setIsAuth(false);
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   return (
     <>
       <Navbar username={profile?.username} />
-      {isAuth ? (
+      {isAuth === null ? (
+        <div className="flex h-[calc(100vh-64px)] bg-gray-50 items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading...</p>
+          </div>
+        </div>
+      ) : isAuth ? (
         <AuthenticatedHome username={profile?.username} />
       ) : (
         <GuestLanding loading={isAuth === null} />
