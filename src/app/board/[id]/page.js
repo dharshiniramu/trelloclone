@@ -42,6 +42,10 @@ export default function BoardViewPage() {
           .single();
 
         if (error) throw error;
+        console.log("=== BOARD LOADED ===");
+        console.log("Board data:", data);
+        console.log("Workspace ID:", data?.workspace_id);
+        console.log("Workspace ID type:", typeof data?.workspace_id);
         setBoard(data);
       } catch (err) {
         console.error("Error fetching board:", err.message);
@@ -560,7 +564,27 @@ const deleteCard = async (listId, cardId) => {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <button 
-              onClick={() => router.push('/boards')}
+              onClick={() => {
+                // Debug logging
+                console.log("=== BACK BUTTON DEBUG ===");
+                console.log("Board data:", board);
+                console.log("Workspace ID:", board?.workspace_id);
+                console.log("Workspace ID type:", typeof board?.workspace_id);
+                console.log("Is workspace_id truthy:", !!board?.workspace_id);
+                console.log("Is workspace_id null:", board?.workspace_id === null);
+                console.log("Is workspace_id undefined:", board?.workspace_id === undefined);
+                
+                // Check if board belongs to a workspace
+                if (board?.workspace_id) {
+                  console.log("✅ Navigating to workspace boards page:", `/workspace/${board.workspace_id}/boards`);
+                  // Navigate to workspace boards page
+                  router.push(`/workspace/${board.workspace_id}/boards`);
+                } else {
+                  console.log("❌ Navigating to general boards page (no workspace_id)");
+                  // Navigate to general boards page
+                  router.push('/boards');
+                }
+              }}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             >
               <ArrowLeft className="h-5 w-5 text-gray-600" />

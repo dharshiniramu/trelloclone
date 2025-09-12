@@ -107,8 +107,7 @@ function AuthenticatedHome({ username }) {
             workspace_id,
             role,
             created_at,
-            invited_by_user_id,
-            workspaces(name)
+            invited_by_user_id
           `)
           .eq("invited_user_id", user.id)
           .eq("status", "pending")
@@ -133,7 +132,35 @@ function AuthenticatedHome({ username }) {
           }
           setWorkspaceInvitations([]);
         } else {
-          setWorkspaceInvitations(workspaceInvitationsData || []);
+          // Fetch workspace names for invitations
+          let workspaceInvitationsWithNames = workspaceInvitationsData || [];
+          if (workspaceInvitationsWithNames.length > 0) {
+            try {
+              const workspaceIds = workspaceInvitationsWithNames
+                .map(inv => inv.workspace_id)
+                .filter(id => id !== null);
+              
+              if (workspaceIds.length > 0) {
+                const { data: workspaces, error: workspacesError } = await supabase
+                  .from("workspaces")
+                  .select("id, name")
+                  .in("id", workspaceIds);
+
+                if (!workspacesError && workspaces) {
+                  workspaceInvitationsWithNames = workspaceInvitationsWithNames.map(invitation => {
+                    const workspace = workspaces.find(w => w.id === invitation.workspace_id);
+                    return {
+                      ...invitation,
+                      workspaces: workspace ? { name: workspace.name } : null
+                    };
+                  });
+                }
+              }
+            } catch (err) {
+              console.error("Error fetching workspace names for invitations:", err);
+            }
+          }
+          setWorkspaceInvitations(workspaceInvitationsWithNames);
         }
 
         // Get usernames for all inviters

@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, X, Building2, Trash, Users } from "lucide-react";
+import { Plus, X, Building2, Trash, Users, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient"; // 👈 you need to create this file like I showed before
 
 export default function WorkspacePage() {
@@ -25,15 +25,98 @@ export default function WorkspacePage() {
     getUser();
   }, []);
 
-  // ✅ Load workspaces from DB
+  // ✅ Load workspaces from DB - only show workspaces user owns or is a member of
   const loadWorkspaces = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from("workspaces").select("*");
-      if (error) throw error;
-      setWorkspaces(data);
+      if (!user) {
+        setWorkspaces([]);
+        return;
+      }
+
+      // Get workspaces owned by the user
+      const { data: ownedWorkspaces, error: ownedError } = await supabase
+        .from("workspaces")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (ownedError) {
+        console.error("Error loading owned workspaces:", ownedError);
+      }
+
+      // Get workspaces where user is a member (accepted invitations)
+      let member = [];
+      try {
+        console.log("Loading member workspaces for user:", user.id);
+        
+        // First get the workspace IDs from invitations
+        const { data: invitations, error: invitationError } = await supabase
+          .from("workspace_invitations")
+          .select("workspace_id")
+          .eq("invited_user_id", user.id)
+          .eq("status", "accepted");
+
+        if (invitationError) {
+          console.error("Error loading workspace invitations:", invitationError);
+          console.error("Error details:", {
+            code: invitationError.code,
+            message: invitationError.message,
+            details: invitationError.details,
+            hint: invitationError.hint
+          });
+        } else if (invitations && invitations.length > 0) {
+          console.log("Found invitations:", invitations);
+          
+          // Get workspace details for each invitation
+          const workspaceIds = invitations.map(inv => inv.workspace_id).filter(id => id !== null);
+          console.log("Workspace IDs to fetch:", workspaceIds);
+          
+          if (workspaceIds.length > 0) {
+            const { data: memberWorkspaces, error: memberError } = await supabase
+              .from("workspaces")
+              .select("*")
+              .in("id", workspaceIds);
+
+            if (memberError) {
+              console.error("Error loading member workspace details:", memberError);
+            } else {
+              member = memberWorkspaces || [];
+              console.log("Loaded member workspaces:", member);
+            }
+          }
+        } else {
+          console.log("No accepted invitations found for user");
+        }
+      } catch (err) {
+        console.error("Exception in loadWorkspaces member section:", err);
+        member = [];
+      }
+
+      // Combine owned and member workspaces, removing duplicates
+      const owned = ownedWorkspaces || [];
+
+      // Create a map to avoid duplicates
+      const workspaceMap = new Map();
+      
+      // Add owned workspaces
+      owned.forEach(workspace => {
+        workspaceMap.set(workspace.id, { ...workspace, userRole: 'owner' });
+      });
+
+      // Add member workspaces (only if not already owned)
+      member.forEach(workspace => {
+        if (!workspaceMap.has(workspace.id)) {
+          workspaceMap.set(workspace.id, { ...workspace, userRole: 'member' });
+        }
+      });
+
+      // Convert map back to array
+      const filteredWorkspaces = Array.from(workspaceMap.values());
+      setWorkspaces(filteredWorkspaces);
+
     } catch (err) {
       console.error("Error loading workspaces:", err.message);
+      setWorkspaces([]);
     } finally {
       setLoading(false);
     }
@@ -43,6 +126,18 @@ export default function WorkspacePage() {
     if (user) {
       loadWorkspaces();
     }
+  }, [user]);
+
+  // Refresh workspaces when the page becomes visible (e.g., after accepting invitations)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && user) {
+        loadWorkspaces();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [user]);
 
   // ✅ Add workspace to DB
@@ -93,6 +188,14 @@ export default function WorkspacePage() {
               <h1 className="text-2xl font-bold text-gray-900">Workspaces</h1>
               <div className="flex gap-3">
                 <button 
+                  onClick={() => loadWorkspaces()}
+                  disabled={loading}
+                  className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button 
                   onClick={() => setShowInviteModal(true)}
                   className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-sm"
                 >
@@ -112,7 +215,7 @@ export default function WorkspacePage() {
               <div className="text-gray-500 animate-fade-in">Loading...</div>
             ) : workspaces.length === 0 ? (
               <div className="text-gray-500 animate-fade-in-up">
-                No workspaces found. Create one!
+                No workspaces found. Create one or wait for an invitation!
               </div>
             ) : (
               <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 animate-fade-in-up">
@@ -129,18 +232,29 @@ export default function WorkspacePage() {
     </div>
 
     {/* Title */}
-    <div className="font-semibold text-gray-900">{workspace.name}</div>
+    <div className="font-semibold text-gray-900 mb-1">{workspace.name}</div>
+    
+    {/* User Role Badge */}
+    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mb-2 ${
+      workspace.userRole === 'owner' 
+        ? 'bg-blue-100 text-blue-800' 
+        : 'bg-green-100 text-green-800'
+    }`}>
+      {workspace.userRole === 'owner' ? 'Owner' : 'Member'}
+    </div>
 
-    {/* 🗑️ Trash delete button */}
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        deleteWorkspace(workspace.id);
-      }}
-      className="absolute top-2 right-2 p-1 hover:bg-red-100 rounded"
-    >
-      <Trash className="h-4 w-4 text-red-500" />
-    </button>
+    {/* 🗑️ Trash delete button - only show for owned workspaces */}
+    {workspace.userRole === 'owner' && (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          deleteWorkspace(workspace.id);
+        }}
+        className="absolute top-2 right-2 p-1 hover:bg-red-100 rounded"
+      >
+        <Trash className="h-4 w-4 text-red-500" />
+      </button>
+    )}
   </div>
 ))}
               </div>
@@ -157,7 +271,7 @@ export default function WorkspacePage() {
 
       {showInviteModal && (
         <InviteMembersToWorkspaceModal
-          workspaces={workspaces}
+          workspaces={workspaces.filter(w => w.userRole === 'owner')}
           currentUser={user}
           onClose={() => setShowInviteModal(false)}
         />
@@ -168,12 +282,221 @@ export default function WorkspacePage() {
 
 function CreateWorkspaceModal({ onClose, onCreated }) {
   const [name, setName] = useState("");
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isOwnerSearch, setIsOwnerSearch] = useState(false);
+
   const canSubmit = name.trim().length > 0;
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        setCurrentUser(user);
+      }
+    };
+    getCurrentUser();
+  }, []);
+
+  // Search for users based on email or username
+  const searchUsers = async (query) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setIsOwnerSearch(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Check if user is searching for themselves
+      if (currentUser) {
+        const { data: currentUserProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .eq("id", currentUser.id)
+          .single();
+
+        if (!profileError && currentUserProfile) {
+          const isSearchingSelf = 
+            currentUserProfile.username?.toLowerCase().includes(query.toLowerCase()) ||
+            currentUserProfile.email?.toLowerCase().includes(query.toLowerCase());
+          
+          if (isSearchingSelf) {
+            setIsOwnerSearch(true);
+            setSearchResults([]);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      setIsOwnerSearch(false);
+
+      // Search for other users - try multiple approaches
+      let profiles = [];
+      let profilesError = null;
+
+      // First, try to search with both username and email
+      const { data: searchResults, error: searchError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
+        .limit(10);
+
+      if (searchError) {
+        // If email column doesn't exist, fallback to username only
+        if (searchError.code === '42703') {
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        } else {
+          // For other errors, try username search only
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .ilike("username", `%${query}%`)
+            .limit(10);
+
+          if (!usernameError && usernameResults) {
+            profiles = usernameResults.map(p => ({ ...p, email: null }));
+          }
+        }
+      } else if (searchResults) {
+        profiles = searchResults;
+      }
+
+      // If no results with the OR query, try separate searches
+      if (profiles.length === 0) {
+        // Try username search
+        const { data: usernameResults, error: usernameError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("username", `%${query}%`)
+          .limit(5);
+
+        if (!usernameError && usernameResults) {
+          profiles = [...profiles, ...usernameResults];
+        }
+
+        // Try email search (if email column exists)
+        const { data: emailResults, error: emailError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .ilike("email", `%${query}%`)
+          .limit(5);
+
+        if (!emailError && emailResults) {
+          // Merge results, avoiding duplicates
+          const existingIds = profiles.map(p => p.id);
+          const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
+          profiles = [...profiles, ...newEmailResults];
+        }
+      }
+
+      setSearchResults(profiles);
+    } catch (error) {
+      console.error("Error searching users:", error);
+      setSearchResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchUsers(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const handleUserSelect = (user) => {
+    if (!selectedMembers.find(member => member.id === user.id)) {
+      setSelectedMembers([...selectedMembers, user]);
+    }
+    setSearchQuery("");
+    setSearchResults([]);
+    setError(""); // Clear any previous errors
+  };
+
+  const removeSelectedMember = (userId) => {
+    setSelectedMembers(selectedMembers.filter(member => member.id !== userId));
+  };
 
   const submit = async () => {
     if (!canSubmit) return;
-    await onCreated({ name: name.trim() });
-    onClose();
+    setSubmitting(true);
+    setError("");
+
+    try {
+      // Create the workspace first
+      const { data: workspaceData, error: workspaceError } = await supabase
+        .from("workspaces")
+        .insert([{ name: name.trim(), user_id: currentUser.id }])
+        .select()
+        .single();
+
+      if (workspaceError) throw workspaceError;
+
+      // Send invitations if members are selected
+      if (selectedMembers.length > 0) {
+        console.log("Sending invitations to members:", selectedMembers);
+        console.log("Workspace data:", workspaceData);
+        console.log("Current user:", currentUser);
+        
+        const invitationsToSend = selectedMembers.map(member => ({
+          workspace_id: workspaceData.id,
+          invited_user_id: member.id,
+          invited_by_user_id: currentUser.id,
+          role: 'member',
+          status: 'pending'
+        }));
+
+        console.log("Invitations to send:", invitationsToSend);
+
+        const { data: invitationData, error: invitationError } = await supabase
+          .from("workspace_invitations")
+          .insert(invitationsToSend)
+          .select();
+
+        console.log("Invitation result:", { data: invitationData, error: invitationError });
+
+        if (invitationError) {
+          console.error("Error sending invitations:", invitationError);
+          console.error("Error details:", {
+            code: invitationError.code,
+            message: invitationError.message,
+            details: invitationError.details,
+            hint: invitationError.hint
+          });
+          // Don't fail the workspace creation if invitations fail
+          setError("Workspace created successfully, but some invitations failed to send. Please run the database setup script to fix the table structure.");
+        } else {
+          console.log("Invitations sent successfully:", invitationData);
+        }
+      }
+
+      await onCreated(workspaceData);
+      onClose();
+    } catch (err) {
+      console.error("Error creating workspace:", err.message);
+      setError(`Failed to create workspace: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -203,12 +526,123 @@ function CreateWorkspaceModal({ onClose, onCreated }) {
           />
         </div>
 
+        {/* Invite Members Section */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Invite Members (Optional)
+          </label>
+          
+          {/* Search Input */}
+          <div className="relative mb-3">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setError(""); // Clear errors when user starts typing
+              }}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Search by email or username..."
+            />
+            {loading && (
+              <div className="absolute right-3 top-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              </div>
+            )}
+          </div>
+
+          {/* Owner Search Message */}
+          {isOwnerSearch && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  👑
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900">You are the workspace owner</div>
+                  <div className="text-sm text-blue-700">You don't need to invite yourself!</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Search Results Dropdown */}
+          {searchResults.length > 0 && !isOwnerSearch && (
+            <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto mb-3">
+              {searchResults.map((user) => (
+                <button
+                  key={user.id}
+                  onClick={() => handleUserSelect(user)}
+                  className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {user.username?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-900">
+                        {user.username}
+                      </div>
+                      {user.email && (
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* No Results Message */}
+          {searchQuery && searchResults.length === 0 && !loading && !isOwnerSearch && (
+            <div className="p-4 text-center text-gray-500 mb-3">
+              <div className="text-sm">No users found matching "{searchQuery}"</div>
+              <div className="text-xs text-gray-400 mt-1">Try searching by username or email</div>
+            </div>
+          )}
+
+          {/* Selected Members */}
+          {selectedMembers.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-700">Selected Members:</h3>
+              <div className="space-y-2">
+                {selectedMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900">{member.username}</div>
+                      {member.email && (
+                        <div className="text-sm text-gray-500">{member.email}</div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeSelectedMember(member.id)}
+                      className="p-1 hover:bg-red-100 rounded"
+                    >
+                      <X className="h-4 w-4 text-red-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg mb-4">
+            <div className="text-sm text-red-600">{error}</div>
+          </div>
+        )}
+
         <button
           onClick={submit}
-          disabled={!canSubmit}
+          disabled={!canSubmit || submitting}
           className="w-full bg-blue-600 text-white py-2 rounded-lg disabled:opacity-50 transition-all duration-200 hover:bg-blue-700 hover:shadow-lg"
         >
-          Create
+          {submitting ? "Creating..." : `Create${selectedMembers.length > 0 ? ` and Invite ${selectedMembers.length} Member${selectedMembers.length !== 1 ? 's' : ''}` : ''}`}
         </button>
       </div>
     </div>
@@ -455,7 +889,8 @@ function InviteMembersToWorkspaceModal({ workspaces, currentUser, onClose }) {
         workspace_id: parseInt(selectedWorkspace.id),
         invited_user_id: member.id,
         invited_by_user_id: user.id,
-        role: 'member'
+        role: 'member',
+        status: 'pending'
       }));
 
       // Send invitations
