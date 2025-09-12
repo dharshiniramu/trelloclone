@@ -1,8 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import Navbar from '@/components/Navbar';
 import Sidebar from '@/components/Sidebar';
+import CreateBoardFromTemplateModal from '@/components/CreateBoardFromTemplateModal';
 
 const categories = [
   { label: "Personal", value: "personal" },
@@ -88,7 +91,10 @@ const templates = {
 
 export default function TemplatesPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [selected, setSelected] = useState("personal");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
 
   // Set initial category based on URL parameter
   useEffect(() => {
@@ -97,6 +103,18 @@ export default function TemplatesPage() {
       setSelected(category);
     }
   }, [searchParams]);
+
+  // Handle template click
+  const handleTemplateClick = (template) => {
+    setSelectedTemplate(template);
+    setShowCreateModal(true);
+  };
+
+  // Handle board creation success
+  const handleBoardCreated = (board) => {
+    // Navigate to the created board
+    router.push(`/board/${board.id}`);
+  };
 
   return (
     <>
@@ -125,7 +143,15 @@ export default function TemplatesPage() {
         {/* Main content */}
         <main className="flex-1 flex flex-col px-8 py-12">
           <div className="max-w-6xl mx-auto w-full">
+            {/* Back button and header */}
             <div className="mb-8">
+              <Link 
+                href="/"
+                className="inline-flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 mb-4 group"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2 group-hover:-translate-x-1 transition-transform duration-200" />
+                <span className="text-sm font-medium">Back to Home</span>
+              </Link>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
                 {categories.find(cat => cat.value === selected)?.label} Templates
               </h1>
@@ -139,6 +165,7 @@ export default function TemplatesPage() {
               {templates[selected].map((tpl, idx) => (
                 <div
                   key={idx}
+                  onClick={() => handleTemplateClick(tpl)}
                   className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 overflow-hidden group cursor-pointer"
                 >
                   <div className="relative">
@@ -151,12 +178,21 @@ export default function TemplatesPage() {
                         e.target.src = "https://via.placeholder.com/400x300?text=Template+Image";
                       }}
                     />
+                    {/* Overlay with create board button */}
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 flex items-center justify-center">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <button className="bg-white text-gray-900 px-6 py-3 rounded-lg font-medium shadow-lg hover:bg-gray-50 transition-colors duration-200">
+                          Create Board
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="p-6">
                     <h3 className="text-xl font-semibold text-gray-900 group-hover:text-blue-600 transition-colors duration-200">
                       {tpl.title}
                     </h3>
+                    <p className="text-sm text-gray-500 mt-1">Click to create board from this template</p>
                   </div>
                 </div>
               ))}
@@ -164,6 +200,18 @@ export default function TemplatesPage() {
           </div>
         </main>
       </div>
+
+      {/* Create Board Modal */}
+      {showCreateModal && selectedTemplate && (
+        <CreateBoardFromTemplateModal
+          template={selectedTemplate}
+          onClose={() => {
+            setShowCreateModal(false);
+            setSelectedTemplate(null);
+          }}
+          onCreated={handleBoardCreated}
+        />
+      )}
     </>
   );
 }
