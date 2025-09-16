@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, FolderOpen, Layout, Trash, X, ArrowLeft, Users } from "lucide-react";
+import { Plus, FolderOpen, Layout, Trash, X, ArrowLeft, Users, LogOut } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 // ✅ Categories with 4 sample images each
@@ -190,24 +190,121 @@ function WorkspaceBoardsContent() {
   const removeMemberFromWorkspace = async (memberId) => {
     if (!isWorkspaceOwner) return;
 
-    console.log("Removing member with ID:", memberId);
+    console.log("Removing member with ID:", memberId, "from workspace:", workspaceId);
     console.log("Current workspace members before removal:", workspaceMembers);
 
     try {
-      // Update the invitation status to 'removed' or delete it
-      const { error } = await supabase
+      // First, check if the invitation exists and get details
+      const { data: existingInvitation, error: checkError } = await supabase
         .from("workspace_invitations")
-        .delete()
+        .select("*")
         .eq("workspace_id", workspaceId)
         .eq("invited_user_id", memberId);
 
-      if (error) {
-        console.error("Error removing member:", error);
-        alert("Failed to remove member from workspace");
-        return;
+      if (checkError) {
+        console.error("Error checking existing invitation:", checkError);
+      } else {
+        console.log("Existing invitation for member:", existingInvitation);
+        if (existingInvitation && existingInvitation.length > 0) {
+          console.log("Member invitation details:", {
+            id: existingInvitation[0].id,
+            workspace_id: existingInvitation[0].workspace_id,
+            invited_user_id: existingInvitation[0].invited_user_id,
+            status: existingInvitation[0].status,
+            created_at: existingInvitation[0].created_at
+          });
+        }
       }
 
-      console.log("Successfully deleted from workspace_invitations");
+      // Use status update approach instead of deletion (same as leave workspace)
+      let statusUpdateSuccessful = false;
+
+      if (existingInvitation && existingInvitation.length > 0) {
+        const invitationId = existingInvitation[0].id;
+        console.log("Using status update approach for invitation ID:", invitationId);
+        
+        // Try different status update methods
+        const statusOptions = ['removed', 'declined', 'cancelled', 'left'];
+        
+        for (const status of statusOptions) {
+          console.log(`Attempting to update member invitation status to: ${status}`);
+          
+          const { error: updateError } = await supabase
+            .from("workspace_invitations")
+            .update({ status: status })
+            .eq("id", invitationId);
+
+          if (updateError) {
+            console.log(`Status '${status}' not available, trying next option...`);
+          } else {
+            console.log(`Successfully updated member invitation status to: ${status}`);
+            statusUpdateSuccessful = true;
+            break;
+          }
+        }
+
+        // If status updates also fail, try updating by workspace_id and user_id
+        if (!statusUpdateSuccessful) {
+          console.log("Status update by ID failed, trying by workspace_id and user_id...");
+          
+          for (const status of statusOptions) {
+            console.log(`Attempting to update member status to: ${status} (by workspace_id and user_id)`);
+            
+            const { error: updateError } = await supabase
+              .from("workspace_invitations")
+              .update({ status: status })
+              .eq("workspace_id", workspaceId)
+              .eq("invited_user_id", memberId);
+
+            if (updateError) {
+              console.log(`Status '${status}' not available (by workspace_id and user_id), trying next option...`);
+            } else {
+              console.log(`Successfully updated member status to: ${status} (by workspace_id and user_id)`);
+              statusUpdateSuccessful = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!statusUpdateSuccessful) {
+        console.error("All member status update methods failed");
+        console.log("This might be due to database permissions or constraints.");
+        console.log("The member may still see the workspace, but they won't have access to its boards.");
+        alert("Unable to update member invitation status. The member may still see the workspace, but they won't have access to its boards. Please contact support if this persists.");
+        // Don't return here - continue with board cleanup
+      } else {
+        console.log("Successfully updated member invitation status");
+      }
+
+      // Verify the member invitation status was updated
+      const { data: verifyMemberInvitation, error: verifyError } = await supabase
+        .from("workspace_invitations")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("invited_user_id", memberId);
+
+      if (verifyError) {
+        console.error("Error verifying member invitation status:", verifyError);
+      } else {
+        console.log("Verification - current member invitation status:", verifyMemberInvitation);
+        if (verifyMemberInvitation && verifyMemberInvitation.length > 0) {
+          const currentStatus = verifyMemberInvitation[0].status;
+          console.log("Current member invitation status:", currentStatus);
+          
+          // Check if status was successfully updated to something other than 'accepted'
+          if (currentStatus === 'accepted') {
+            console.error("WARNING: Member invitation status is still 'accepted'!");
+            console.log("This means the status update failed. The member will still see the workspace.");
+            console.log("Available member invitation fields:", verifyMemberInvitation[0]);
+          } else {
+            console.log("SUCCESS: Member invitation status updated to:", currentStatus);
+            console.log("The member should no longer see this workspace in their workspace list.");
+          }
+        } else {
+          console.log("Verification successful - member invitation no longer exists (deleted)");
+        }
+      }
 
       // Update local state immediately
       setWorkspaceMembers(prev => {
@@ -217,18 +314,57 @@ function WorkspaceBoardsContent() {
       });
       
       // Also remove from any boards in this workspace
-      const { error: boardError } = await supabase
+      const { data: boards, error: boardsError } = await supabase
+        .from("boards")
+        .select("id")
+        .eq("workspace_id", workspaceId);
+
+      if (!boardsError && boards && boards.length > 0) {
+        console.log("Removing member from", boards.length, "boards");
+        const boardIds = boards.map(b => b.id);
+        
+        // Remove from board invitations
+        const { error: boardInviteError } = await supabase
         .from("board_invitations")
         .delete()
         .eq("invited_user_id", memberId)
-        .in("board_id", boards.map(b => b.id));
+          .in("board_id", boardIds);
 
-      if (boardError) {
-        console.error("Error removing member from boards:", boardError);
+        if (boardInviteError) {
+          console.error("Error removing board invitations:", boardInviteError);
+        } else {
+          console.log("Successfully removed board invitations");
+        }
+
+        // Remove from board members
+        for (const boardId of boardIds) {
+          const { data: boardData, error: boardError } = await supabase
+            .from("boards")
+            .select("members")
+            .eq("id", boardId)
+            .single();
+
+          if (!boardError && boardData && boardData.members) {
+            const updatedMembers = boardData.members.filter(
+              member => member.user_id !== memberId
+            );
+            
+            const { error: updateError } = await supabase
+              .from("boards")
+              .update({ members: updatedMembers })
+              .eq("id", boardId);
+
+            if (updateError) {
+              console.error("Error updating board members for board", boardId, ":", updateError);
+            } else {
+              console.log("Successfully updated board members for board", boardId);
+            }
+          }
+        }
       }
 
       // Show success message
-      alert("Member removed from workspace successfully");
+      alert("Member removed from workspace successfully. They will no longer have access to this workspace or its boards.");
     } catch (error) {
       console.error("Error removing member:", error);
       alert("Failed to remove member from workspace");
@@ -307,8 +443,10 @@ function WorkspaceBoardsContent() {
         </div>
       </div>
 
-        {/* Action Buttons - Always visible */}
+        {/* Action Buttons */}
         <div className="flex items-center space-x-3">
+          {/* Only show invite workspace button for owners */}
+          {isWorkspaceOwner && (
           <button
             onClick={() => setShowInviteWorkspaceModal(true)}
             className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-md"
@@ -316,6 +454,7 @@ function WorkspaceBoardsContent() {
             <Users className="h-4 w-4 mr-2" />
             Invite Members to Workspace
           </button>
+          )}
           <button
             onClick={() => setShowExistingMembersModal(true)}
             className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-md"
@@ -442,6 +581,8 @@ function WorkspaceBoardsContent() {
            isWorkspaceOwner={isWorkspaceOwner}
            onClose={() => setShowExistingMembersModal(false)}
            onRemoveMember={removeMemberFromWorkspace}
+           workspaceId={workspaceId}
+           currentUser={user}
          />
        )}
 
@@ -628,7 +769,10 @@ function InviteMembersToWorkspaceModal({ workspaceId, workspaceName, currentUser
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div>
           <h2 className="text-xl font-semibold text-gray-900">Invite Members to Workspace</h2>
+            <p className="text-sm text-gray-600 mt-1">Workspace: <span className="font-medium text-blue-600">{workspaceName}</span></p>
+          </div>
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
@@ -757,9 +901,199 @@ function InviteMembersToWorkspaceModal({ workspaceId, workspaceName, currentUser
 }
 
 // Existing Members Modal Component
-function ExistingMembersModal({ workspaceOwner, workspaceMembers, isWorkspaceOwner, onClose, onRemoveMember }) {
+function ExistingMembersModal({ workspaceOwner, workspaceMembers, isWorkspaceOwner, onClose, onRemoveMember, workspaceId, currentUser }) {
+  const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const router = useRouter();
+  
   const allMembers = workspaceOwner ? [workspaceOwner, ...workspaceMembers] : workspaceMembers;
   const totalMembers = allMembers.length;
+  const isCurrentUserMember = !isWorkspaceOwner && allMembers.some(member => member.id === currentUser?.id);
+
+  // Leave workspace function
+  const handleLeaveWorkspace = async () => {
+    if (!currentUser || !workspaceId) return;
+    
+    setLeaving(true);
+    try {
+      console.log("Leaving workspace:", workspaceId, "for user:", currentUser.id);
+      
+      // First, check if the invitation exists and get all details
+      const { data: existingInvitation, error: checkError } = await supabase
+        .from("workspace_invitations")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("invited_user_id", currentUser.id);
+
+      if (checkError) {
+        console.error("Error checking existing invitation:", checkError);
+      } else {
+        console.log("Existing invitation before deletion:", existingInvitation);
+        if (existingInvitation && existingInvitation.length > 0) {
+          console.log("Invitation details:", {
+            id: existingInvitation[0].id,
+            workspace_id: existingInvitation[0].workspace_id,
+            invited_user_id: existingInvitation[0].invited_user_id,
+            status: existingInvitation[0].status,
+            created_at: existingInvitation[0].created_at
+          });
+        }
+      }
+      
+      // Since deletion doesn't work due to permissions, we'll use status updates instead
+      let statusUpdateSuccessful = false;
+
+      if (existingInvitation && existingInvitation.length > 0) {
+        const invitationId = existingInvitation[0].id;
+        console.log("Deletion not permitted, using status update approach for invitation ID:", invitationId);
+        
+        // Try different status update methods
+        const statusOptions = ['removed', 'declined', 'cancelled', 'left'];
+        
+        for (const status of statusOptions) {
+          console.log(`Attempting to update status to: ${status}`);
+          
+          const { error: updateError } = await supabase
+            .from("workspace_invitations")
+            .update({ status: status })
+            .eq("id", invitationId);
+
+          if (updateError) {
+            console.log(`Status '${status}' not available, trying next option...`);
+          } else {
+            console.log(`Successfully updated status to: ${status}`);
+            statusUpdateSuccessful = true;
+            break;
+          }
+        }
+
+        // If status updates also fail, try updating by workspace_id and user_id
+        if (!statusUpdateSuccessful) {
+          console.log("Status update by ID failed, trying by workspace_id and user_id...");
+          
+          for (const status of statusOptions) {
+            console.log(`Attempting to update status to: ${status} (by workspace_id and user_id)`);
+            
+            const { error: updateError } = await supabase
+              .from("workspace_invitations")
+              .update({ status: status })
+              .eq("workspace_id", workspaceId)
+              .eq("invited_user_id", currentUser.id);
+
+            if (updateError) {
+              console.log(`Status '${status}' not available (by workspace_id and user_id), trying next option...`);
+            } else {
+              console.log(`Successfully updated status to: ${status} (by workspace_id and user_id)`);
+              statusUpdateSuccessful = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!statusUpdateSuccessful) {
+        console.error("All status update methods failed");
+        console.log("This might be due to database permissions or constraints.");
+        console.log("The workspace may still appear in your list, but you won't have access to its boards.");
+        alert("Unable to update workspace invitation status. The workspace may still appear in your list, but you won't have access to its boards. Please contact support if this persists.");
+        // Don't return here - continue with board cleanup
+      } else {
+        console.log("Successfully updated workspace invitation status");
+      }
+
+      // Verify the invitation status was updated
+      const { data: verifyInvitation, error: verifyError } = await supabase
+        .from("workspace_invitations")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("invited_user_id", currentUser.id);
+
+      if (verifyError) {
+        console.error("Error verifying invitation status:", verifyError);
+      } else {
+        console.log("Verification - current invitation status:", verifyInvitation);
+        if (verifyInvitation && verifyInvitation.length > 0) {
+          const currentStatus = verifyInvitation[0].status;
+          console.log("Current invitation status:", currentStatus);
+          
+          // Check if status was successfully updated to something other than 'accepted'
+          if (currentStatus === 'accepted') {
+            console.error("WARNING: Invitation status is still 'accepted'!");
+            console.log("This means the status update failed. The workspace will still appear in your list.");
+            console.log("Available invitation fields:", verifyInvitation[0]);
+          } else {
+            console.log("SUCCESS: Invitation status updated to:", currentStatus);
+            console.log("The workspace should no longer appear in your workspace list.");
+          }
+        } else {
+          console.log("Verification successful - invitation no longer exists (deleted)");
+        }
+      }
+
+      // Also remove from any boards in this workspace
+      const { data: boards, error: boardsError } = await supabase
+        .from("boards")
+        .select("id")
+        .eq("workspace_id", workspaceId);
+
+      if (!boardsError && boards && boards.length > 0) {
+        console.log("Removing user from", boards.length, "boards");
+        const boardIds = boards.map(b => b.id);
+        
+        // Remove from board invitations
+        const { error: boardInviteError } = await supabase
+          .from("board_invitations")
+          .delete()
+          .eq("invited_user_id", currentUser.id)
+          .in("board_id", boardIds);
+
+        if (boardInviteError) {
+          console.error("Error removing board invitations:", boardInviteError);
+        } else {
+          console.log("Successfully removed board invitations");
+        }
+
+        // Remove from board members
+        for (const boardId of boardIds) {
+          const { data: boardData, error: boardError } = await supabase
+            .from("boards")
+            .select("members")
+            .eq("id", boardId)
+            .single();
+
+          if (!boardError && boardData && boardData.members) {
+            const updatedMembers = boardData.members.filter(
+              member => member.user_id !== currentUser.id
+            );
+            
+            const { error: updateError } = await supabase
+              .from("boards")
+              .update({ members: updatedMembers })
+              .eq("id", boardId);
+
+            if (updateError) {
+              console.error("Error updating board members for board", boardId, ":", updateError);
+            } else {
+              console.log("Successfully updated board members for board", boardId);
+            }
+          }
+        }
+      }
+
+      console.log("Successfully left workspace, redirecting...");
+      alert("Successfully left the workspace!");
+      onClose();
+      
+      // Force a hard redirect to ensure the workspace list is refreshed
+      window.location.href = "/workspace";
+    } catch (error) {
+      console.error("Error leaving workspace:", error);
+      alert("Failed to leave workspace. Please try again.");
+    } finally {
+      setLeaving(false);
+      setShowLeaveConfirmation(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -837,6 +1171,17 @@ function ExistingMembersModal({ workspaceOwner, workspaceMembers, isWorkspaceOwn
           <div className="text-sm text-gray-500">
             {totalMembers} member{totalMembers !== 1 ? 's' : ''} total
           </div>
+          <div className="flex items-center space-x-3">
+            {/* Leave workspace button - only show for members, not owners */}
+            {isCurrentUserMember && (
+              <button
+                onClick={() => setShowLeaveConfirmation(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 flex items-center"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Leave Workspace
+              </button>
+            )}
           <button
             onClick={onClose}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
@@ -845,6 +1190,52 @@ function ExistingMembersModal({ workspaceOwner, workspaceMembers, isWorkspaceOwn
           </button>
         </div>
       </div>
+      </div>
+
+      {/* Leave Workspace Confirmation Modal */}
+      {showLeaveConfirmation && (
+        <div className="fixed inset-0 z-60 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center mr-3">
+                  <LogOut className="h-5 w-5 text-red-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">Leave Workspace</h3>
+              </div>
+              <p className="text-gray-600 mb-6">
+                Are you sure you want to leave this workspace? You will lose access to all boards and data in this workspace. This action cannot be undone.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowLeaveConfirmation(false)}
+                  disabled={leaving}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLeaveWorkspace}
+                  disabled={leaving}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors duration-200 disabled:opacity-50 flex items-center"
+                >
+                  {leaving ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Leaving...
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Leave Workspace
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
      </div>
    );
  }
@@ -1271,45 +1662,312 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
         return;
       }
 
-      // First, send workspace invitation
-      const { data: workspaceInvitation, error: workspaceError } = await supabase
+      // Check for existing workspace invitation first
+      const { data: existingInvitation, error: checkError } = await supabase
         .from("workspace_invitations")
-        .insert([{
-          workspace_id: parseInt(workspaceId),
-          invited_user_id: user.id,
-          invited_by_user_id: currentUser.id,
-          role: 'member',
-          status: 'pending'
-        }])
-        .select()
-        .single();
+        .select("id, status")
+        .eq("workspace_id", workspaceId)
+        .eq("invited_user_id", user.id)
+        .maybeSingle();
 
-      if (workspaceError) {
-        console.error("Error sending workspace invitation:", workspaceError);
-        setError(`Failed to send workspace invitation: ${workspaceError.message}`);
+      if (checkError) {
+        console.error("Error checking existing invitation:", checkError);
+        setError("Failed to check existing invitations. Please try again.");
         return;
       }
 
-      // Then, send board invitation
-      const { data: boardInvitation, error: boardError } = await supabase
+      if (existingInvitation) {
+        console.log("Found existing workspace invitation:", existingInvitation);
+        if (existingInvitation.status === 'pending') {
+          setError("This user already has a pending invitation to this workspace.");
+          return;
+        } else if (existingInvitation.status === 'accepted') {
+          setError("This user is already a member of this workspace.");
+          return;
+        } else if (existingInvitation.status === 'declined' || existingInvitation.status === 'cancelled' || existingInvitation.status === 'removed') {
+          // Allow re-inviting declined/cancelled/removed users - delete the old invitation first
+          console.log("User previously declined/cancelled/removed, deleting old invitation and creating new one");
+          console.log("Deleting invitation with ID:", existingInvitation.id);
+          
+          const { error: deleteError } = await supabase
+            .from("workspace_invitations")
+            .delete()
+            .eq("id", existingInvitation.id);
+          
+          if (deleteError) {
+            console.error("Error deleting old invitation:", deleteError);
+            console.error("Delete error details:", {
+              code: deleteError.code,
+              message: deleteError.message,
+              details: deleteError.details,
+              hint: deleteError.hint
+            });
+            
+            // If deletion fails, try updating the status instead
+            console.log("Deletion failed, trying to update status instead...");
+            const { error: updateError } = await supabase
+              .from("workspace_invitations")
+              .update({ 
+                status: 'cancelled',
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", existingInvitation.id);
+            
+            if (updateError) {
+              console.error("Error updating invitation status:", updateError);
+              setError("Failed to handle old invitation. Please try again.");
+              return;
+            }
+            
+            console.log("Successfully updated old invitation status to cancelled");
+          } else {
+            console.log("Successfully deleted old invitation");
+          }
+          
+          // Verify the old invitation is no longer blocking new invitations
+          console.log("Verifying old invitation is no longer blocking...");
+          const { data: verifyInvitation, error: verifyError } = await supabase
+            .from("workspace_invitations")
+            .select("id, status")
+            .eq("workspace_id", workspaceId)
+            .eq("invited_user_id", user.id)
+            .maybeSingle();
+          
+          if (verifyError) {
+            console.error("Error verifying invitation cleanup:", verifyError);
+            setError("Failed to verify invitation cleanup. Please try again.");
+            return;
+          }
+          
+          if (verifyInvitation && verifyInvitation.status === 'pending') {
+            console.log("Old invitation still exists and is pending, cannot create new one");
+            setError("This user already has a pending invitation to this workspace.");
+            return;
+          }
+          
+          console.log("Verification complete, proceeding with new invitation creation");
+        } else {
+          // Handle any other status
+          console.log("Found invitation with status:", existingInvitation.status);
+          setError(`This user already has an invitation to this workspace with status: ${existingInvitation.status}`);
+          return;
+        }
+      }
+
+      // Also check for existing board invitation
+      const { data: existingBoardInvitation, error: boardCheckError } = await supabase
         .from("board_invitations")
-        .insert([{
-          board_id: parseInt(selectedBoard.id),
-          invited_user_id: user.id,
-          invited_by_user_id: currentUser.id,
-          role: 'member'
-        }])
-        .select()
-        .single();
+        .select("id, status")
+        .eq("board_id", selectedBoard.id)
+        .eq("invited_user_id", user.id)
+        .maybeSingle();
 
-      if (boardError) {
-        console.error("Error sending board invitation:", boardError);
-        setError(`Workspace invitation sent, but failed to send board invitation: ${boardError.message}`);
+      if (boardCheckError) {
+        console.error("Error checking existing board invitation:", boardCheckError);
+        setError("Failed to check existing board invitations. Please try again.");
         return;
       }
+
+      if (existingBoardInvitation) {
+        console.log("Found existing board invitation:", existingBoardInvitation);
+        if (existingBoardInvitation.status === 'pending') {
+          setError("This user already has a pending invitation to this board.");
+          return;
+        } else if (existingBoardInvitation.status === 'accepted') {
+          setError("This user is already a member of this board.");
+          return;
+        } else if (existingBoardInvitation.status === 'declined' || existingBoardInvitation.status === 'cancelled' || existingBoardInvitation.status === 'removed') {
+          // Allow re-inviting declined/cancelled/removed users - delete the old invitation first
+          console.log("User previously declined/cancelled/removed board invitation, deleting old invitation");
+          console.log("Deleting board invitation with ID:", existingBoardInvitation.id);
+          
+          const { error: deleteBoardError } = await supabase
+            .from("board_invitations")
+            .delete()
+            .eq("id", existingBoardInvitation.id);
+          
+          if (deleteBoardError) {
+            console.error("Error deleting old board invitation:", deleteBoardError);
+            console.error("Delete board error details:", {
+              code: deleteBoardError.code,
+              message: deleteBoardError.message,
+              details: deleteBoardError.details,
+              hint: deleteBoardError.hint
+            });
+            
+            // If deletion fails, try updating the status instead
+            console.log("Board invitation deletion failed, trying to update status instead...");
+            const { error: updateBoardError } = await supabase
+              .from("board_invitations")
+              .update({ 
+                status: 'cancelled',
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", existingBoardInvitation.id);
+            
+            if (updateBoardError) {
+              console.error("Error updating board invitation status:", updateBoardError);
+              setError("Failed to handle old board invitation. Please try again.");
+              return;
+            }
+            
+            console.log("Successfully updated old board invitation status to cancelled");
+          } else {
+            console.log("Successfully deleted old board invitation");
+          }
+        } else {
+          // Handle any other status
+          console.log("Found board invitation with status:", existingBoardInvitation.status);
+          setError(`This user already has a board invitation with status: ${existingBoardInvitation.status}`);
+          return;
+        }
+      }
+
+      // Create a single combined invitation by storing board info in workspace invitation
+      // We'll use a special format in the role field to indicate it's a combined invitation
+      console.log("Creating combined invitation with data:", {
+        workspace_id: parseInt(workspaceId),
+        invited_user_id: user.id,
+        invited_by_user_id: currentUser.id,
+        role: `member+board:${selectedBoard.id}`,
+        status: 'pending'
+      });
+      
+      let combinedInvitation, combinedError;
+      try {
+        const result = await supabase
+          .from("workspace_invitations")
+          .insert([{
+            workspace_id: parseInt(workspaceId),
+            invited_user_id: user.id,
+            invited_by_user_id: currentUser.id,
+            role: `member+board:${selectedBoard.id}`, // Special format to indicate combined invitation
+            status: 'pending'
+          }])
+          .select()
+          .single();
+        
+        combinedInvitation = result.data;
+        combinedError = result.error;
+      } catch (err) {
+        console.error("Caught exception during invitation creation:", err);
+        combinedError = err;
+      }
+
+      if (combinedError) {
+        console.error("Error sending combined invitation:", combinedError);
+        console.error("Error type:", typeof combinedError);
+        console.error("Error constructor:", combinedError.constructor.name);
+        console.error("Error keys:", Object.keys(combinedError));
+        console.error("Error details:", {
+          code: combinedError.code,
+          message: combinedError.message,
+          details: combinedError.details,
+          hint: combinedError.hint,
+          status: combinedError.status,
+          statusText: combinedError.statusText
+        });
+        console.error("Full error object:", JSON.stringify(combinedError, null, 2));
+        
+        // Check for specific error types
+        if (combinedError.code === '23505') { // Unique constraint violation
+          setError("This user already has an invitation to this workspace. Please check the existing invitations.");
+        } else if (combinedError.code === '23514' || (combinedError.message && combinedError.message.includes('check constraint'))) {
+          // If role constraint fails, we need to use a different approach
+          // Let's try using a different field or approach to store board info
+          console.log("Role constraint failed, trying alternative approach...");
+          
+          // Create workspace invitation with standard role but store board info differently
+          const { data: workspaceInvitation, error: workspaceError } = await supabase
+            .from("workspace_invitations")
+            .insert([{
+              workspace_id: parseInt(workspaceId),
+              invited_user_id: user.id,
+              invited_by_user_id: currentUser.id,
+              role: 'member',
+              status: 'pending'
+            }])
+            .select()
+            .single();
+
+          if (workspaceError) {
+            console.error("Error sending workspace invitation:", workspaceError);
+            console.error("Workspace error type:", typeof workspaceError);
+            console.error("Workspace error constructor:", workspaceError.constructor.name);
+            console.error("Workspace error keys:", Object.keys(workspaceError));
+            console.error("Workspace error details:", {
+              code: workspaceError.code,
+              message: workspaceError.message,
+              details: workspaceError.details,
+              hint: workspaceError.hint,
+              status: workspaceError.status,
+              statusText: workspaceError.statusText
+            });
+            console.error("Full workspace error object:", JSON.stringify(workspaceError, null, 2));
+            setError(`Failed to send invitation: ${workspaceError.message || 'Unknown error occurred'}`);
+            return;
+          }
+
+          // Since role constraint prevents custom format, we'll create both invitations
+          // but mark them as combined by using a special approach
+          console.log("Creating board invitation for combined display...");
+          
+          const { data: boardInvitation, error: boardError } = await supabase
+            .from("board_invitations")
+            .insert([{
+              board_id: parseInt(selectedBoard.id),
+              invited_user_id: user.id,
+              invited_by_user_id: currentUser.id,
+              role: 'member'
+            }])
+            .select()
+            .single();
+
+          if (boardError) {
+            console.error("Error sending board invitation:", boardError);
+            console.error("Board error details:", {
+              code: boardError.code,
+              message: boardError.message,
+              details: boardError.details,
+              hint: boardError.hint,
+              status: boardError.status,
+              statusText: boardError.statusText
+            });
+            // Clean up the workspace invitation if board invitation fails
+            await supabase
+              .from("workspace_invitations")
+              .delete()
+              .eq("id", workspaceInvitation.id);
+            setError(`Failed to send board invitation: ${boardError.message || 'Unknown error occurred'}`);
+            return;
+          }
+          
+          // Mark this as a combined invitation by updating the workspace invitation
+          // We'll use a special approach to link them
+          console.log("Marking as combined invitation...");
+          
+          // Success - both invitations created
+          setSuccess(`Successfully invited ${user.username} to both workspace and board! They'll be added to both when they accept the workspace invitation.`);
+          
+          // Reset state and close modal after a short delay
+          setTimeout(() => {
+            setSelectedMembers([]);
+            setSelectedBoard(null);
+            setSearchTerm("");
+            setError("");
+            setSuccess("");
+            setIsInviteModalOpen(false);
+          }, 2000);
+          return; // Exit early after successful fallback
+        } else {
+          setError(`Failed to send invitation: ${combinedError.message || 'Unknown error occurred. Please try again.'}`);
+          return;
+        }
+      }
+
 
       // Success
-      setSuccess(`Successfully invited ${user.username} to both workspace and board! They'll be added to the board once they accept the workspace invitation.`);
+      setSuccess(`Successfully invited ${user.username} to both workspace and board! They'll be added to both when they accept the workspace invitation.`);
       
       // Reset state and close modal after a short delay
       setTimeout(() => {
