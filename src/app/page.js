@@ -181,8 +181,24 @@ function AuthenticatedHome({ username }) {
           }
           setBoardInvitations([]);
         } else {
-          setBoardInvitations(boardInvitationsData || []);
+          console.log("Board invitations fetched:", boardInvitationsData?.length || 0);
+          
+          // Filter out board invitations that have corresponding workspace invitations
+          // This will make them appear as combined invitations
+          const filteredBoardInvitations = (boardInvitationsData || []).filter(boardInv => {
+            // Check if there's a corresponding workspace invitation for the same user
+            const hasCorrespondingWorkspaceInvitation = workspaceInvitationsData?.some(workspaceInv => 
+              workspaceInv.invited_user_id === boardInv.invited_user_id
+            );
+            return !hasCorrespondingWorkspaceInvitation;
+          });
+          
+          console.log("Filtered board invitations (removed combined ones):", filteredBoardInvitations.length);
+          setBoardInvitations(filteredBoardInvitations);
         }
+
+        // Initialize workspace invitations with names
+        let workspaceInvitationsWithNames = workspaceInvitationsData || [];
 
         // Handle workspace invitations
         if (workspaceInvitationsError) {
@@ -192,34 +208,98 @@ function AuthenticatedHome({ username }) {
           }
           setWorkspaceInvitations([]);
         } else {
-          // Fetch workspace names for invitations
-          let workspaceInvitationsWithNames = workspaceInvitationsData || [];
+          console.log("Workspace invitations fetched:", workspaceInvitationsData?.length || 0);
+          // Fetch workspace names and board names for invitations
           if (workspaceInvitationsWithNames.length > 0) {
             try {
               const workspaceIds = workspaceInvitationsWithNames
                 .map(inv => inv.workspace_id)
                 .filter(id => id !== null);
               
+              // Extract board IDs from combined invitations
+              const boardIds = workspaceInvitationsWithNames
+                .map(inv => {
+                  if (inv.role && inv.role.includes('+board:')) {
+                    return inv.role.split('+board:')[1];
+                  }
+                  return null;
+                })
+                .filter(id => id !== null);
+              
+              console.log("Workspace IDs for names:", workspaceIds);
+              console.log("Board IDs for names:", boardIds);
+              
+              // Fetch workspace names
+              let workspaces = [];
               if (workspaceIds.length > 0) {
-                const { data: workspaces, error: workspacesError } = await supabase
+                const { data: workspacesData, error: workspacesError } = await supabase
                   .from("workspaces")
                   .select("id, name")
                   .in("id", workspaceIds);
 
-                if (!workspacesError && workspaces) {
-                  workspaceInvitationsWithNames = workspaceInvitationsWithNames.map(invitation => {
-                    const workspace = workspaces.find(w => w.id === invitation.workspace_id);
-                    return {
-                      ...invitation,
-                      workspaces: workspace ? { name: workspace.name } : null
-                    };
-                  });
+                if (!workspacesError && workspacesData) {
+                  workspaces = workspacesData;
+                  console.log("Workspaces found:", workspaces);
+                } else {
+                  console.error("Error fetching workspaces:", workspacesError);
                 }
               }
+
+              // Fetch board names for combined invitations
+              let boards = [];
+              if (boardIds.length > 0) {
+                const { data: boardsData, error: boardsError } = await supabase
+                  .from("boards")
+                  .select("id, title")
+                  .in("id", boardIds);
+
+                if (!boardsError && boardsData) {
+                  boards = boardsData;
+                  console.log("Boards found:", boards);
+                } else {
+                  console.error("Error fetching boards:", boardsError);
+                }
+              }
+
+              // Combine workspace and board data
+                  workspaceInvitationsWithNames = workspaceInvitationsWithNames.map(invitation => {
+                    const workspace = workspaces.find(w => w.id === invitation.workspace_id);
+                
+                // Check if this is a combined invitation by looking at the role field first
+                let isCombined = invitation.role && invitation.role.includes('+board:');
+                let boardId = null;
+                let board = null;
+                
+                if (isCombined) {
+                  // Extract board ID from role field
+                  boardId = invitation.role.split('+board:')[1];
+                  board = boardId ? boards.find(b => b.id === parseInt(boardId)) : null;
+                } else {
+                  // Check if there's a corresponding board invitation for the same user
+                  const correspondingBoardInvitation = boardInvitationsData?.find(boardInv => 
+                    boardInv.invited_user_id === invitation.invited_user_id
+                  );
+                  
+                  if (correspondingBoardInvitation) {
+                    isCombined = true;
+                    boardId = correspondingBoardInvitation.board_id;
+                    board = boards.find(b => b.id === parseInt(boardId));
+                  }
+                }
+                
+                    return {
+                      ...invitation,
+                  workspaces: workspace ? { name: workspace.name } : null,
+                  boards: board ? { title: board.title } : null,
+                  invitation_type: isCombined ? 'combined' : 'workspace',
+                  board_id: boardId
+                    };
+                  });
             } catch (err) {
-              console.error("Error fetching workspace names for invitations:", err);
+              console.error("Error fetching workspace and board names for invitations:", err);
             }
           }
+          console.log("Final workspace invitations with names:", workspaceInvitationsWithNames);
           setWorkspaceInvitations(workspaceInvitationsWithNames);
         }
 
@@ -289,27 +369,17 @@ function AuthenticatedHome({ username }) {
             }));
             setBoardInvitations(boardInvitationsWithUsernames);
 
-            // Add usernames to workspace invitations
-            const workspaceInvitationsWithUsernames = (workspaceInvitationsData || []).map(invitation => ({
+            // Add usernames to workspace invitations (use the ones with workspace names)
+            const workspaceInvitationsWithUsernames = workspaceInvitationsWithNames.map(invitation => ({
               ...invitation,
               inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
             }));
             setWorkspaceInvitations(workspaceInvitationsWithUsernames);
-
-            // Add usernames to accepted board invitations
-            const acceptedBoardInvitationsWithUsernames = (acceptedBoardInvitationsData || []).map(invitation => ({
-              ...invitation,
-              inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
-            }));
-            setAcceptedBoardInvitations(acceptedBoardInvitationsWithUsernames);
-
-            // Add usernames to accepted workspace invitations
-            const acceptedWorkspaceInvitationsWithUsernames = (acceptedWorkspaceInvitationsData || []).map(invitation => ({
-              ...invitation,
-              inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
-            }));
-            setAcceptedWorkspaceInvitations(acceptedWorkspaceInvitationsWithUsernames);
           }
+        } else {
+          // If no invitations, ensure empty arrays are set
+          setBoardInvitations([]);
+          setWorkspaceInvitations([]);
         }
       } catch (error) {
         console.error("Error fetching invitations:", error);
@@ -349,7 +419,82 @@ function AuthenticatedHome({ username }) {
             alert("Failed to accept invitation. It may have already been processed.");
           }
         } else if (type === 'workspace') {
-          // Use the database function to accept workspace invitation
+          // Check if this is a combined invitation
+          const invitation = workspaceInvitations.find(inv => inv.id === invitationId);
+          const isCombined = invitation?.invitation_type === 'combined' && invitation?.board_id;
+          
+          if (isCombined) {
+            // Handle combined invitation - accept both workspace and board
+            console.log("Accepting combined invitation for workspace and board");
+            
+            // First accept the workspace invitation
+            const { data: workspaceData, error: workspaceError } = await supabase.rpc('accept_workspace_invitation', {
+              invitation_id: invitationId
+            });
+
+            if (workspaceError) {
+              console.error("Error accepting workspace invitation:", workspaceError);
+              alert("Failed to accept workspace invitation. Please try again.");
+              return;
+            }
+
+            if (workspaceData) {
+              // Get board ID from the invitation data
+              let boardId = invitation.board_id;
+              
+              // If no board_id in invitation data, try to extract from role field
+              if (!boardId && invitation.role && invitation.role.includes('+board:')) {
+                boardId = invitation.role.split('+board:')[1];
+              }
+              
+              if (boardId) {
+                // Now add the user to the board
+                const { data: boardData, error: boardError } = await supabase
+                  .from("boards")
+                  .select("members")
+                  .eq("id", boardId)
+                  .single();
+
+                if (boardError) {
+                  console.error("Error fetching board data:", boardError);
+                  alert("Joined workspace but failed to add to board. Please contact support.");
+                  return;
+              }
+
+              // Add user to board members
+              const currentMembers = boardData.members || [];
+              const newMember = {
+                user_id: invitation.invited_user_id,
+                role: 'member',
+                added_at: new Date().toISOString()
+              };
+
+              const { error: updateBoardError } = await supabase
+                .from("boards")
+                .update({ 
+                  members: [...currentMembers, newMember]
+                })
+                .eq("id", boardId);
+
+              if (updateBoardError) {
+                console.error("Error adding user to board:", updateBoardError);
+                alert("Joined workspace but failed to add to board. Please contact support.");
+                return;
+              }
+
+              // Remove the invitation from the list
+              setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+              alert(`Successfully joined the workspace "${invitation.workspaces?.name}" and board "${invitation.boards?.title}"!`);
+              } else {
+                // Regular workspace invitation (no board)
+                setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+                alert(`Successfully joined the workspace "${invitation.workspaces?.name}"!`);
+              }
+            } else {
+              alert("Failed to accept invitation. It may have already been processed.");
+            }
+          } else {
+            // Regular workspace invitation
           const { data, error } = await supabase.rpc('accept_workspace_invitation', {
             invitation_id: invitationId
           });
@@ -366,6 +511,7 @@ function AuthenticatedHome({ username }) {
             alert("Successfully joined the workspace!");
           } else {
             alert("Failed to accept invitation. It may have already been processed.");
+            }
           }
         }
       } else if (action === 'decline') {
@@ -517,28 +663,66 @@ function AuthenticatedHome({ username }) {
                     Workspace Invitations ({workspaceInvitations.length})
                   </h2>
                   <div className="space-y-4">
-                    {workspaceInvitations.map((invitation) => (
+                    {workspaceInvitations.map((invitation) => {
+                      // Check if this is a combined invitation by looking at the role field
+                      const isCombined = invitation.role && invitation.role.includes('+board:');
+                      const boardId = isCombined ? invitation.role.split('+board:')[1] : null;
+                      return (
                       <div
                         key={`workspace-${invitation.id}`}
-                        className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
+                          className={`bg-white border rounded-xl p-6 hover:shadow-md transition-shadow duration-200 ${
+                            isCombined 
+                              ? 'border-purple-200 bg-gradient-to-r from-purple-50 to-indigo-50' 
+                              : 'border-gray-200'
+                          }`}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                              <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                                isCombined 
+                                  ? 'bg-purple-100' 
+                                  : 'bg-green-100'
+                              }`}>
+                                {isCombined ? (
+                                  <div className="flex items-center space-x-1">
+                                    <Users className="h-4 w-4 text-purple-600" />
+                                    <Layout className="h-4 w-4 text-purple-600" />
+                                  </div>
+                                ) : (
                               <Users className="h-6 w-6 text-green-600" />
+                                )}
                             </div>
                             <div className="flex-1">
-                              <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                                Workspace Invitation
+                                <h3 className={`text-xl font-semibold mb-2 ${
+                                  isCombined ? 'text-purple-900' : 'text-gray-900'
+                                }`}>
+                                  {isCombined ? 'Workspace + Board Invitation' : 'Workspace Invitation'}
                               </h3>
-                              <p className="text-gray-600 mb-2">
-                                <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> invited you to join the workspace{' '}
-                                <span className="font-medium text-green-600">"{invitation.workspaces?.name}"</span>
+                                <p className="text-gray-600 mb-3 text-lg">
+                                  <span className="font-semibold text-lg">{invitation.inviter_username || 'Someone'}</span> invited you to join{' '}
+                                  {isCombined ? (
+                                    <>
+                                      the workspace <span className="font-bold text-xl text-purple-600">"{invitation.workspaces?.name}"</span>
+                                      {' '}and board <span className="font-bold text-xl text-indigo-600">"{invitation.boards?.title}"</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      the workspace <span className="font-bold text-xl text-green-600">"{invitation.workspaces?.name}"</span>
+                                    </>
+                                  )}
                               </p>
                               <div className="flex items-center space-x-4 text-sm text-gray-500">
                                 <span>Role: {invitation.role}</span>
                                 <span>•</span>
                                 <span>{new Date(invitation.created_at).toLocaleDateString()}</span>
+                                  {isCombined && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                        Combined
+                                      </span>
+                                    </>
+                                  )}
                               </div>
                             </div>
                           </div>
@@ -566,7 +750,8 @@ function AuthenticatedHome({ username }) {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 </div>
               )}

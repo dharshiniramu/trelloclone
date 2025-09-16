@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
@@ -13,6 +13,10 @@ export default function WorkspacePage() {
   const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
+  const loadingRef = useRef(false);
+  const creatingWorkspaceRef = useRef(false);
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const creatingWorkspaceKey = useRef(null);
 
   // ✅ Get logged in user
   useEffect(() => {
@@ -27,6 +31,16 @@ export default function WorkspacePage() {
 
   // ✅ Load workspaces from DB - only show workspaces user owns or is a member of
   const loadWorkspaces = async () => {
+    if (loadingRef.current) {
+      console.log("loadWorkspaces already in progress, skipping");
+      return; // Prevent multiple simultaneous calls
+    }
+    if (creatingWorkspaceRef.current || isCreatingWorkspace) {
+      console.log("Workspace creation in progress, skipping loadWorkspaces");
+      return; // Prevent loading while creating workspace
+    }
+    console.log("loadWorkspaces called for user:", user?.id);
+    loadingRef.current = true;
     setLoading(true);
     try {
       if (!user) {
@@ -42,6 +56,8 @@ export default function WorkspacePage() {
 
       if (ownedError) {
         console.error("Error loading owned workspaces:", ownedError);
+      } else {
+        console.log("Owned workspaces from DB:", ownedWorkspaces?.map(w => ({ id: w.id, name: w.name, user_id: w.user_id })));
       }
 
       // Get workspaces where user is a member (accepted invitations)
@@ -81,7 +97,7 @@ export default function WorkspacePage() {
               console.error("Error loading member workspace details:", memberError);
             } else {
               member = memberWorkspaces || [];
-              console.log("Loaded member workspaces:", member);
+              console.log("Member workspaces from DB:", member.map(w => ({ id: w.id, name: w.name, user_id: w.user_id })));
             }
           }
         } else {
@@ -112,13 +128,29 @@ export default function WorkspacePage() {
 
       // Convert map back to array
       const filteredWorkspaces = Array.from(workspaceMap.values());
-      setWorkspaces(filteredWorkspaces);
+      
+      console.log("Filtered workspaces before final deduplication:", filteredWorkspaces.map(w => ({ id: w.id, name: w.name, userRole: w.userRole })));
+      
+      // Additional safety check to prevent duplicates by ID using Set for better performance
+      const seenIds = new Set();
+      const uniqueWorkspaces = filteredWorkspaces.filter(workspace => {
+        if (seenIds.has(workspace.id)) {
+          console.log("Found duplicate workspace during final deduplication:", workspace);
+          return false;
+        }
+        seenIds.add(workspace.id);
+        return true;
+      });
+      
+      console.log("Final unique workspaces:", uniqueWorkspaces.map(w => ({ id: w.id, name: w.name, userRole: w.userRole })));
+      setWorkspaces(uniqueWorkspaces);
 
     } catch (err) {
       console.error("Error loading workspaces:", err.message);
       setWorkspaces([]);
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   };
 
@@ -129,21 +161,35 @@ export default function WorkspacePage() {
   }, [user]);
 
   // Refresh workspaces when the page becomes visible (e.g., after accepting invitations)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && user) {
-        loadWorkspaces();
-      }
-    };
+  // Temporarily disabled to prevent duplicate loading
+  // useEffect(() => {
+  //   const handleVisibilityChange = () => {
+  //     if (!document.hidden && user && !loading) {
+  //       loadWorkspaces();
+  //     }
+  //   };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [user]);
+  //   document.addEventListener('visibilitychange', handleVisibilityChange);
+  //   return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  // }, [user, loading]);
 
   // ✅ Add workspace to DB
   const addWorkspace = async (workspace) => {
     if (!user) return;
 
+    // Create a unique key for this workspace creation
+    const workspaceKey = `${workspace.name}-${user.id}`;
+    
+    // Prevent multiple calls for the same workspace creation using both ref and state
+    if (creatingWorkspaceRef.current || isCreatingWorkspace || creatingWorkspaceKey.current === workspaceKey) {
+      console.log("Workspace creation already in progress for this workspace, skipping duplicate call");
+      return;
+    }
+
+    creatingWorkspaceRef.current = true;
+    setIsCreatingWorkspace(true);
+    creatingWorkspaceKey.current = workspaceKey;
+    
     try {
       const { data, error } = await supabase
         .from("workspaces")
@@ -152,9 +198,28 @@ export default function WorkspacePage() {
 
       if (error) throw error;
 
-      setWorkspaces((prev) => [...prev, data[0]]);
+      console.log("Workspace created successfully:", data[0]);
+      
+      // Add userRole: 'owner' to the newly created workspace
+      const workspaceWithRole = { ...data[0], userRole: 'owner' };
+      
+      // Add to state immediately with duplicate prevention
+      setWorkspaces((prev) => {
+        // Check if workspace already exists by ID
+        const exists = prev.some(w => w.id === workspaceWithRole.id);
+        if (exists) {
+          console.log("Workspace already exists in state, not adding duplicate");
+          return prev;
+        }
+        console.log("Adding new workspace to state:", workspaceWithRole);
+        return [...prev, workspaceWithRole];
+      });
     } catch (err) {
       console.error("Error creating workspace:", err.message);
+    } finally {
+      creatingWorkspaceRef.current = false;
+      setIsCreatingWorkspace(false);
+      creatingWorkspaceKey.current = null;
     }
   };
   const deleteWorkspace = async (workspaceId) => {
@@ -437,11 +502,29 @@ function CreateWorkspaceModal({ onClose, onCreated }) {
   };
 
   const submit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submitting) return; // Prevent multiple submissions
     setSubmitting(true);
     setError("");
 
     try {
+      // Check if workspace with same name already exists
+      const { data: existingWorkspaces, error: checkError } = await supabase
+        .from("workspaces")
+        .select("id, name, user_id")
+        .ilike("name", name.trim());
+
+      if (checkError) {
+        console.error("Error checking existing workspaces:", checkError);
+        setError("Failed to validate workspace name. Please try again.");
+        return;
+      }
+
+      // Check if any workspace with the same name exists
+      if (existingWorkspaces && existingWorkspaces.length > 0) {
+        setError(`A workspace with the name "${name.trim()}" already exists. Please choose a different name.`);
+        return;
+      }
+
       // Create the workspace first
       const { data: workspaceData, error: workspaceError } = await supabase
         .from("workspaces")
