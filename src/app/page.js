@@ -183,18 +183,8 @@ function AuthenticatedHome({ username }) {
         } else {
           console.log("Board invitations fetched:", boardInvitationsData?.length || 0);
           
-          // Filter out board invitations that have corresponding workspace invitations
-          // This will make them appear as combined invitations
-          const filteredBoardInvitations = (boardInvitationsData || []).filter(boardInv => {
-            // Check if there's a corresponding workspace invitation for the same user
-            const hasCorrespondingWorkspaceInvitation = workspaceInvitationsData?.some(workspaceInv => 
-              workspaceInv.invited_user_id === boardInv.invited_user_id
-            );
-            return !hasCorrespondingWorkspaceInvitation;
-          });
-          
-          console.log("Filtered board invitations (removed combined ones):", filteredBoardInvitations.length);
-          setBoardInvitations(filteredBoardInvitations);
+          // Store all board invitations for now - we'll filter them after processing workspace invitations
+          setBoardInvitations(boardInvitationsData || []);
         }
 
         // Initialize workspace invitations with names
@@ -276,14 +266,23 @@ function AuthenticatedHome({ username }) {
                   board = boardId ? boards.find(b => b.id === parseInt(boardId)) : null;
                 } else {
                   // Check if there's a corresponding board invitation for the same user
+                  console.log("Checking for corresponding board invitation for user:", invitation.invited_user_id);
+                  console.log("Available board invitations:", boardInvitationsData?.map(bi => ({ 
+                    invited_user_id: bi.invited_user_id, 
+                    board_id: bi.board_id 
+                  })));
+                  
                   const correspondingBoardInvitation = boardInvitationsData?.find(boardInv => 
                     boardInv.invited_user_id === invitation.invited_user_id
                   );
+                  
+                  console.log("Found corresponding board invitation:", correspondingBoardInvitation);
                   
                   if (correspondingBoardInvitation) {
                     isCombined = true;
                     boardId = correspondingBoardInvitation.board_id;
                     board = boards.find(b => b.id === parseInt(boardId));
+                    console.log("Marked as combined invitation with board:", board?.title);
                   }
                 }
                 
@@ -301,6 +300,28 @@ function AuthenticatedHome({ username }) {
           }
           console.log("Final workspace invitations with names:", workspaceInvitationsWithNames);
           setWorkspaceInvitations(workspaceInvitationsWithNames);
+          
+          // Now filter out board invitations that have corresponding workspace invitations
+          // This will make them appear as combined invitations
+          console.log("Filtering board invitations. Total board invitations:", boardInvitationsData?.length || 0);
+          console.log("Workspace invitations with names:", workspaceInvitationsWithNames?.map(wi => ({
+            invited_user_id: wi.invited_user_id,
+            invitation_type: wi.invitation_type
+          })));
+          
+          const filteredBoardInvitations = (boardInvitationsData || []).filter(boardInv => {
+            // Check if there's a corresponding workspace invitation for the same user
+            const hasCorrespondingWorkspaceInvitation = workspaceInvitationsWithNames?.some(workspaceInv => 
+              workspaceInv.invited_user_id === boardInv.invited_user_id
+            );
+            
+            console.log(`Board invitation for user ${boardInv.invited_user_id} has corresponding workspace invitation:`, hasCorrespondingWorkspaceInvitation);
+            
+            return !hasCorrespondingWorkspaceInvitation;
+          });
+          
+          console.log("Filtered board invitations (removed combined ones):", filteredBoardInvitations.length);
+          setBoardInvitations(filteredBoardInvitations);
         }
 
         // Handle accepted board invitations
