@@ -3,8 +3,11 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, X, Building2, Trash, Users, RefreshCw } from "lucide-react";
+import { Plus, X, Building2, Trash, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient"; // 👈 you need to create this file like I showed before
+
+// Global flag to prevent multiple loads across the entire app
+let globalLoadingFlag = false;
 
 export default function WorkspacePage() {
   const router = useRouter();
@@ -13,10 +16,13 @@ export default function WorkspacePage() {
   const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const loadingRef = useRef(false);
-  const creatingWorkspaceRef = useRef(false);
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const creatingWorkspaceRef = useRef(false);
   const creatingWorkspaceKey = useRef(null);
+  const loadAttemptsRef = useRef(0);
+  const previousUserIdRef = useRef(null);
+  const isLoadingRef = useRef(false);
+  const hasLoadedRef = useRef(false);
 
   // ✅ Get logged in user
   useEffect(() => {
@@ -24,14 +30,35 @@ export default function WorkspacePage() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+      console.log("User changed:", user?.id, "Previous user:", previousUserIdRef.current);
+      
+      // Reset state when user changes
+      if (user?.id !== previousUserIdRef.current) {
+        console.log("User ID changed, resetting state");
+        hasLoadedRef.current = false;
+        isLoadingRef.current = false;
+        setWorkspaces([]);
+        loadAttemptsRef.current = 0;
+        previousUserIdRef.current = user?.id;
+      }
+      
       setUser(user);
     };
     getUser();
   }, []);
 
   // ✅ Load workspaces from DB - only show workspaces user owns or is a member of
-  const loadWorkspaces = async () => {
-    if (loadingRef.current) {
+  const loadWorkspaces = async (forceRefresh = false) => {
+    loadAttemptsRef.current += 1;
+    console.log(`loadWorkspaces attempt #${loadAttemptsRef.current} for user:`, user?.id, "forceRefresh:", forceRefresh, "isLoading:", isLoadingRef.current, "hasLoaded:", hasLoadedRef.current, "globalFlag:", globalLoadingFlag);
+    
+    // Global flag check - most important
+    if (globalLoadingFlag && !forceRefresh) {
+      console.log("Global loading flag is set, skipping loadWorkspaces");
+      return;
+    }
+    
+    if (isLoadingRef.current) {
       console.log("loadWorkspaces already in progress, skipping");
       return; // Prevent multiple simultaneous calls
     }
@@ -39,8 +66,14 @@ export default function WorkspacePage() {
       console.log("Workspace creation in progress, skipping loadWorkspaces");
       return; // Prevent loading while creating workspace
     }
-    console.log("loadWorkspaces called for user:", user?.id);
-    loadingRef.current = true;
+    if (!forceRefresh && hasLoadedRef.current) {
+      console.log("Workspaces already loaded, skipping");
+      return; // Prevent reloading if already loaded
+    }
+    
+    console.log("Starting loadWorkspaces...");
+    globalLoadingFlag = true;
+    isLoadingRef.current = true;
     setLoading(true);
     try {
       if (!user) {
@@ -143,39 +176,55 @@ export default function WorkspacePage() {
       });
       
       console.log("Final unique workspaces:", uniqueWorkspaces.map(w => ({ id: w.id, name: w.name, userRole: w.userRole })));
+      
+      // Additional safety check - prevent duplicates by comparing with current state
       setWorkspaces(uniqueWorkspaces);
+      
+      hasLoadedRef.current = true;
 
     } catch (err) {
       console.error("Error loading workspaces:", err.message);
       setWorkspaces([]);
     } finally {
       setLoading(false);
-      loadingRef.current = false;
+      isLoadingRef.current = false;
+      globalLoadingFlag = false;
     }
   };
 
   useEffect(() => {
-    if (user) {
+    if (user && !hasLoadedRef.current && !isLoadingRef.current) {
+      console.log("useEffect triggered - loading workspaces for user:", user.id);
       loadWorkspaces();
     }
   }, [user]);
 
-  // Refresh workspaces when the page becomes visible (e.g., after accepting invitations)
-  // Temporarily disabled to prevent duplicate loading
-  // useEffect(() => {
-  //   const handleVisibilityChange = () => {
-  //     if (!document.hidden && user && !loading) {
-  //       loadWorkspaces();
-  //     }
-  //   };
+  // Cleanup effect to reset global flag when component unmounts
+  useEffect(() => {
+    return () => {
+      globalLoadingFlag = false;
+      console.log("Component unmounting, resetting global flag");
+    };
+  }, []);
 
-  //   document.addEventListener('visibilitychange', handleVisibilityChange);
-  //   return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  // }, [user, loading]);
+  // Refresh workspaces when the page becomes visible (e.g., after accepting invitations)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && user && !loading && hasLoadedRef.current && !isLoadingRef.current) {
+        // Only refresh if we've already loaded once and page becomes visible
+        console.log("Page became visible, refreshing workspaces");
+        loadWorkspaces(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [user, loading]);
 
   // ✅ Add workspace to DB
   const addWorkspace = async (workspace) => {
-    if (!user) return;
+    if (!user) return { success: false, error: "User not authenticated" };
+
 
     // Create a unique key for this workspace creation
     const workspaceKey = `${workspace.name}-${user.id}`;
@@ -183,7 +232,7 @@ export default function WorkspacePage() {
     // Prevent multiple calls for the same workspace creation using both ref and state
     if (creatingWorkspaceRef.current || isCreatingWorkspace || creatingWorkspaceKey.current === workspaceKey) {
       console.log("Workspace creation already in progress for this workspace, skipping duplicate call");
-      return;
+      return { success: false, error: "Workspace creation already in progress" };
     }
 
     creatingWorkspaceRef.current = true;
@@ -191,6 +240,23 @@ export default function WorkspacePage() {
     creatingWorkspaceKey.current = workspaceKey;
     
     try {
+      // First check if workspace with same name already exists for this user
+      const { data: existingWorkspaces, error: checkError } = await supabase
+        .from("workspaces")
+        .select("id, name")
+        .eq("user_id", user.id)
+        .eq("name", workspace.name);
+
+      if (checkError) {
+        console.error("Error checking existing workspaces:", checkError);
+        throw new Error("Failed to check for existing workspaces");
+      }
+
+      if (existingWorkspaces && existingWorkspaces.length > 0) {
+        throw new Error(`A workspace with the name "${workspace.name}" already exists. Please choose a different name.`);
+      }
+
+      // Create the workspace in the database
       const { data, error } = await supabase
         .from("workspaces")
         .insert([{ name: workspace.name, user_id: user.id }])
@@ -200,12 +266,11 @@ export default function WorkspacePage() {
 
       console.log("Workspace created successfully:", data[0]);
       
-      // Add userRole: 'owner' to the newly created workspace
+      // Only add to UI state AFTER successful database creation
       const workspaceWithRole = { ...data[0], userRole: 'owner' };
       
-      // Add to state immediately with duplicate prevention
       setWorkspaces((prev) => {
-        // Check if workspace already exists by ID
+        // Check if workspace already exists by ID (additional safety)
         const exists = prev.some(w => w.id === workspaceWithRole.id);
         if (exists) {
           console.log("Workspace already exists in state, not adding duplicate");
@@ -214,8 +279,11 @@ export default function WorkspacePage() {
         console.log("Adding new workspace to state:", workspaceWithRole);
         return [...prev, workspaceWithRole];
       });
+      
+      return { success: true, workspace: workspaceWithRole };
     } catch (err) {
       console.error("Error creating workspace:", err.message);
+      return { success: false, error: err.message };
     } finally {
       creatingWorkspaceRef.current = false;
       setIsCreatingWorkspace(false);
@@ -223,23 +291,29 @@ export default function WorkspacePage() {
     }
   };
   const deleteWorkspace = async (workspaceId) => {
-  try {
-    const { error } = await supabase
-      .from("workspaces")
-      .delete()
-      .eq("id", workspaceId);
+    try {
+      const { error } = await supabase
+        .from("workspaces")
+        .delete()
+        .eq("id", workspaceId);
 
-    if (error) throw error;
+      if (error) throw error;
 
-    setWorkspaces((prev) => prev.filter((w) => w.id !== workspaceId));
-  } catch (err) {
-    console.error("Error deleting workspace:", err.message);
-  }
-};
+      setWorkspaces((prev) => prev.filter((w) => w.id !== workspaceId));
+    } catch (err) {
+      console.error("Error deleting workspace:", err.message);
+    }
+  };
 
   // ✅ Navigate to workspace boards
   const handleWorkspaceClick = (workspaceId) => {
     router.push(`/workspace/${workspaceId}/boards`);
+  };
+
+  // ✅ Force refresh workspaces (for when accepting invitations)
+  const refreshWorkspaces = () => {
+    hasLoadedRef.current = false;
+    loadWorkspaces(true);
   };
 
   return (
@@ -252,14 +326,6 @@ export default function WorkspacePage() {
             <div className="flex items-center justify-between mb-6 animate-fade-in">
               <h1 className="text-2xl font-bold text-gray-900">Workspaces</h1>
               <div className="flex gap-3">
-                <button 
-                  onClick={() => loadWorkspaces()}
-                  disabled={loading}
-                  className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </button>
                 <button 
                   onClick={() => setShowInviteModal(true)}
                   className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-all duration-200 hover:shadow-sm"
@@ -329,7 +395,12 @@ export default function WorkspacePage() {
       </div>
       {showCreate && (
         <CreateWorkspaceModal
-          onClose={() => setShowCreate(false)}
+          onClose={() => {
+            setShowCreate(false);
+            // Refresh workspaces after modal closes
+            hasLoadedRef.current = false;
+            loadWorkspaces(true);
+          }}
           onCreated={addWorkspace}
         />
       )}
@@ -572,7 +643,7 @@ function CreateWorkspaceModal({ onClose, onCreated }) {
         }
       }
 
-      await onCreated(workspaceData);
+      // Workspace created successfully, close modal
       onClose();
     } catch (err) {
       console.error("Error creating workspace:", err.message);
@@ -955,17 +1026,30 @@ function InviteMembersToWorkspaceModal({ workspaces, currentUser, onClose }) {
       }
 
       // Filter out users who have pending invitations
-      const newInvitations = selectedMembers.filter(selectedMember => {
-        const hasPendingInvitation = existingInvitations?.some(invitation => 
-          invitation.invited_user_id === selectedMember.id && invitation.status === 'pending'
-        );
-        return !hasPendingInvitation;
-      });
+      await supabase
+  .from("workspace_invitations")
+  .delete()
+  .eq("workspace_id", selectedWorkspace.id)
+  .in("invited_user_id", selectedMembers.map(m => m.id))
+  .eq("status", "declined");
 
+// Filter out only those who still have a pending invite
+const newInvitations = selectedMembers.filter(selectedMember =>
+  !existingInvitations?.some(invitation =>
+    invitation.invited_user_id === selectedMember.id &&
+    invitation.status === 'pending'
+  )
+);
       if (newInvitations.length === 0) {
         setError("All selected users have pending invitations for this workspace.");
         return;
       }
+      // ⚠️ Always remove any old invitation for these users so we can re-invite
+await supabase
+.from("workspace_invitations")
+.delete()
+.eq("workspace_id", selectedWorkspace.id)
+.in("invited_user_id", selectedMembers.map(m => m.id));
 
       // Create invitation objects
       const invitationsToSend = newInvitations.map(member => ({
@@ -977,10 +1061,13 @@ function InviteMembersToWorkspaceModal({ workspaces, currentUser, onClose }) {
       }));
 
       // Send invitations
-      const { data, error } = await supabase
-        .from("workspace_invitations")
-        .insert(invitationsToSend)
-        .select();
+      // Send invitations – create if new, update if it already exists
+const { data, error } = await supabase
+.from("workspace_invitations")
+.upsert(invitationsToSend, {
+  onConflict: 'workspace_id,invited_user_id'
+})
+.select();
 
       if (error) {
         console.error("Error sending invitations:", error);

@@ -1814,7 +1814,35 @@ function AddMembersModal({ boardId, onClose }) {
         return;
       }
 
+      // For users who previously declined invitations, delete the old invitation record
+      // so we can create a new one
+      const declinedInvitations = selectedMembers.filter(selectedMember => 
+        existingInvitations?.some(invitation => 
+          invitation.invited_user_id === selectedMember.id && invitation.status === 'declined'
+        )
+      );
+
+      if (declinedInvitations.length > 0) {
+        console.log("Found users who previously declined invitations, cleaning up old records:", declinedInvitations);
+        
+        const declinedUserIds = declinedInvitations.map(member => member.id);
+        const { error: deleteError } = await supabase
+          .from("board_invitations")
+          .delete()
+          .eq("board_id", boardId)
+          .in("invited_user_id", declinedUserIds)
+          .eq("status", "declined");
+
+        if (deleteError) {
+          console.error("Error deleting declined invitations:", deleteError);
+          // Continue anyway - the new invitation might still work
+        } else {
+          console.log("Successfully cleaned up declined invitation records");
+        }
+      }
+
       // Filter out users who are already members or have pending invitations
+      // Allow re-inviting users who previously declined invitations (we just cleaned up their old records)
       const newInvitations = selectedMembers.filter(selectedMember => {
         const isAlreadyMember = existingMembers.some(existingMember => 
           existingMember.user_id === selectedMember.id

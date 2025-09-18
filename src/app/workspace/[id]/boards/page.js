@@ -697,10 +697,74 @@ function InviteMembersToWorkspaceModal({ workspaceId, workspaceName, currentUser
         return;
       }
 
-      // Filter out users who already have invitations
-      const existingUserIds = existingInvitations?.map(inv => inv.invited_user_id) || [];
-      const newInvitations = selectedMembers.filter(member => !existingUserIds.includes(member.id));
-      const alreadyInvited = selectedMembers.filter(member => existingUserIds.includes(member.id));
+      // Filter out users who already have PENDING invitations (declined/cancelled/removed can be re-invited)
+      const pendingInvitations = existingInvitations?.filter(inv => inv.status === 'pending') || [];
+      const pendingUserIds = pendingInvitations.map(inv => inv.invited_user_id);
+      
+      // Find users with declined/cancelled/removed invitations that can be re-invited
+      const declinedInvitations = existingInvitations?.filter(inv => 
+        ['declined', 'cancelled', 'removed'].includes(inv.status)
+      ) || [];
+      
+      // Clean up old declined/cancelled/removed invitations
+      if (declinedInvitations.length > 0) {
+        console.log("Cleaning up old declined/cancelled/removed invitations:", declinedInvitations);
+        
+        try {
+          for (const oldInvitation of declinedInvitations) {
+            console.log("Cleaning up invitation for user:", oldInvitation.invited_user_id);
+            
+            const { error: deleteError } = await supabase
+              .from("workspace_invitations")
+              .delete()
+              .eq("invited_user_id", oldInvitation.invited_user_id)
+              .eq("workspace_id", workspaceId);
+            
+            if (deleteError) {
+              console.error("Error deleting old invitation:", deleteError);
+              // Try updating status instead
+              const { error: updateError } = await supabase
+                .from("workspace_invitations")
+                .update({ 
+                  status: 'cancelled',
+                  updated_at: new Date().toISOString()
+                })
+                .eq("invited_user_id", oldInvitation.invited_user_id)
+                .eq("workspace_id", workspaceId);
+              
+              if (updateError) {
+                console.error("Error updating old invitation status:", updateError);
+                // Don't fail the entire process, just log the error
+              } else {
+                console.log("Successfully updated old invitation status to cancelled");
+              }
+            } else {
+              console.log("Successfully deleted old invitation");
+            }
+          }
+          
+          // Wait a moment for the cleanup to complete
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (cleanupError) {
+          console.error("Error during cleanup process:", cleanupError);
+          // Don't fail the entire process, just log the error
+        }
+      }
+      
+      // Include users who had declined invitations in the new invitations list
+      const declinedUserIds = declinedInvitations.map(inv => inv.invited_user_id);
+      const newInvitations = selectedMembers.filter(member => 
+        !pendingUserIds.includes(member.id) || declinedUserIds.includes(member.id)
+      );
+      const alreadyInvited = selectedMembers.filter(member => 
+        pendingUserIds.includes(member.id) && !declinedUserIds.includes(member.id)
+      );
+
+      console.log("Invitation filtering results:");
+      console.log("- Pending user IDs:", pendingUserIds);
+      console.log("- Declined user IDs:", declinedUserIds);
+      console.log("- New invitations:", newInvitations.map(m => ({ id: m.id, username: m.username })));
+      console.log("- Already invited:", alreadyInvited.map(m => ({ id: m.id, username: m.username })));
 
       if (alreadyInvited.length > 0) {
         const names = alreadyInvited.map(m => m.username).join(', ');
@@ -722,25 +786,248 @@ function InviteMembersToWorkspaceModal({ workspaceId, workspaceName, currentUser
         status: 'pending'
       }));
 
-      const { data, error } = await supabase
-        .from("workspace_invitations")
-        .insert(invitationsToSend)
-        .select();
+      console.log("Sending invitations:", invitationsToSend);
+      console.log("Number of invitations to send:", invitationsToSend.length);
 
-      if (error) {
-        console.error("Error sending invitations:", error);
-        console.error("Error details:", {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
-        
-        if (error.code === '23505') { // Unique constraint violation
-          setError("Some users have already been invited to this workspace. Please refresh and try again.");
-        } else {
-          setError(`Failed to send invitations: ${error.message}`);
+      if (invitationsToSend.length === 0) {
+        setError("No valid invitations to send.");
+        return;
+      }
+
+      // Validate invitation data before sending
+      for (const invitation of invitationsToSend) {
+        if (!invitation.workspace_id || !invitation.invited_user_id || !invitation.invited_by_user_id) {
+          console.error("Invalid invitation data:", invitation);
+          setError("Invalid invitation data. Please try again.");
+          return;
         }
+        
+        if (typeof invitation.workspace_id !== 'number' || 
+            typeof invitation.invited_user_id !== 'string' || 
+            typeof invitation.invited_by_user_id !== 'string') {
+          console.error("Invalid invitation data types:", invitation);
+          setError("Invalid invitation data types. Please try again.");
+          return;
+        }
+      }
+
+      console.log("All invitation data is valid, proceeding with insert...");
+
+      // Test Supabase connection first
+      console.log("Testing Supabase connection...");
+      console.log("Environment variables:", {
+        hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        hasKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        url: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'Set' : 'Missing',
+        key: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'Set' : 'Missing'
+      });
+      
+      // Test basic Supabase functionality
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        console.log("Auth test result:", { data: authData, error: authError });
+        
+        if (authError) {
+          console.error("Auth test failed:", authError);
+          setError("Supabase authentication failed. Please check your configuration.");
+          return;
+        }
+      } catch (authException) {
+        console.error("Auth test exception:", authException);
+        setError("Supabase connection failed. Please check your configuration.");
+        return;
+      }
+      
+      // Test if the table exists by doing a simple select
+      console.log("Testing if workspace_invitations table exists...");
+      const { data: testData, error: testError } = await supabase
+        .from("workspace_invitations")
+        .select("id")
+        .limit(1);
+      
+      console.log("Table test result:", { data: testData, error: testError });
+      console.log("Test error details:", {
+        code: testError?.code,
+        message: testError?.message,
+        details: testError?.details,
+        hint: testError?.hint
+      });
+      
+      if (testError) {
+        console.error("Table test failed:", testError);
+        if (testError.code === '42P01') {
+          setError("The workspace_invitations table doesn't exist. Please run the database setup script.");
+          return;
+        } else if (testError.code === '42501') {
+          setError("Permission denied. Please check your database permissions.");
+          return;
+        } else {
+          setError(`Database error: ${testError.message || 'Unknown error'}`);
+          return;
+        }
+      }
+
+      // Final check to ensure no pending invitations exist for these users
+      const { data: finalCheck, error: finalCheckError } = await supabase
+        .from("workspace_invitations")
+        .select("invited_user_id, status")
+        .eq("workspace_id", workspaceId)
+        .in("invited_user_id", invitationsToSend.map(inv => inv.invited_user_id))
+        .eq("status", "pending");
+
+      if (finalCheckError) {
+        console.error("Error in final check:", finalCheckError);
+        setError("Failed to verify invitation status. Please try again.");
+        return;
+      }
+
+      if (finalCheck && finalCheck.length > 0) {
+        console.log("Found pending invitations in final check:", finalCheck);
+        setError("Some users have pending invitations. Please refresh and try again.");
+        return;
+      }
+
+      try {
+        // Try inserting one invitation at a time to isolate any issues
+        console.log("Attempting to insert invitations one by one...");
+        
+        const results = [];
+        for (let i = 0; i < invitationsToSend.length; i++) {
+          const invitation = invitationsToSend[i];
+          console.log(`Inserting invitation ${i + 1}/${invitationsToSend.length}:`, invitation);
+          
+          // Try insert without select first to see if that's the issue
+          console.log(`Attempting insert without select for invitation ${i + 1}...`);
+          console.log(`Supabase client info:`, {
+            url: supabase.supabaseUrl,
+            hasAnonKey: !!supabase.supabaseKey,
+            clientType: typeof supabase
+          });
+          
+          try {
+            // Try insert with select to get the actual created invitation
+            const { data: insertData, error: insertError } = await supabase
+  .from('workspace_invitations')
+  .upsert(invitation, {
+    onConflict: 'workspace_id,invited_user_id'
+  })
+  .select();
+
+console.log(`Insert result for invitation ${i + 1}:`, { 
+  data: insertData, 
+  error: insertError,
+  errorType: typeof insertError,
+  errorKeys: insertError ? Object.keys(insertError) : 'N/A'
+});
+            
+            // Check for insert errors first
+            if (insertError) {
+              console.error(`Insert error for invitation ${i + 1}:`, insertError);
+              console.error(`Insert error details:`, {
+                code: insertError.code,
+                message: insertError.message,
+                details: insertError.details,
+                hint: insertError.hint
+              });
+              
+              // Handle specific error types
+              if (insertError.code === '42P01') {
+                setError("The workspace_invitations table doesn't exist. Please run the database setup script.");
+                return;
+              } else if (insertError.code === '42501') {
+                setError("Permission denied. Please check your database permissions.");
+                return;
+              } else if (insertError.code === '23505') {
+                setError(`User ${invitation.invited_user_id} already has a pending invitation to this workspace.`);
+                return;
+              } else {
+                setError(`Failed to create invitation for ${invitation.invited_user_id}: ${insertError.message || 'Database error'}`);
+                return;
+              }
+            }
+            
+            // Check if we have actual data (real invitation created)
+            if (insertData && insertData.length > 0) {
+              console.log(`Invitation ${i + 1} created successfully with data:`, insertData[0]);
+              results.push(insertData[0]);
+            } else {
+              // No data returned, but no error either - this might be a problem
+              console.error(`No data returned for invitation ${i + 1}, but no error either`);
+              
+              // Try to verify by querying the database
+              const { data: verifyData, error: verifyError } = await supabase
+                .from("workspace_invitations")
+                .select("*")
+                .eq("workspace_id", invitation.workspace_id)
+                .eq("invited_user_id", invitation.invited_user_id)
+                .eq("invited_by_user_id", invitation.invited_by_user_id)
+                .order("created_at", { ascending: false })
+                .limit(1);
+              
+              console.log(`Verification query result for invitation ${i + 1}:`, { data: verifyData, error: verifyError });
+              
+              if (verifyData && verifyData.length > 0) {
+                console.log(`Invitation ${i + 1} found in verification query:`, verifyData[0]);
+                results.push(verifyData[0]);
+              } else {
+                // Invitation was not created - this is a real error
+                console.error(`Invitation ${i + 1} was not created in the database`);
+                setError(`Failed to create invitation for ${invitation.invited_user_id}. The invitation was not saved to the database.`);
+                return;
+              }
+            }
+            
+          } catch (insertException) {
+            console.error(`Exception during insert for invitation ${i + 1}:`, insertException);
+            setError(`Failed to send invitation to ${invitation.invited_user_id}: ${insertException.message || 'Database operation failed'}`);
+            return;
+          }
+          
+          // This section is now handled above in the try-catch block
+        }
+        
+        const data = results;
+        const error = null;
+
+        console.log("Insert result - data:", data);
+        console.log("Insert result - error:", error);
+        console.log("Error type:", typeof error);
+        console.log("Error is null:", error === null);
+        console.log("Error is undefined:", error === undefined);
+
+        if (error) {
+          console.error("Error sending invitations:", error);
+          console.error("Error details:", {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+          
+          if (error.code === '23505') { // Unique constraint violation
+            setError("Some users have already been invited to this workspace. Please refresh and try again.");
+          } else {
+            setError(`Failed to send invitations: ${error.message || 'Unknown error occurred'}`);
+          }
+          return;
+        }
+
+        // Check if data is null or empty (which could indicate an error)
+        if (!data || data.length === 0) {
+          console.error("No data returned from insert operation");
+          setError("Failed to send invitations: No data returned from database");
+          return;
+        }
+
+        console.log("Successfully inserted invitations:", data);
+      } catch (insertError) {
+        console.error("Caught exception during insert:", insertError);
+        console.error("Exception details:", {
+          name: insertError.name,
+          message: insertError.message,
+          stack: insertError.stack
+        });
+        setError(`Failed to send invitations: ${insertError.message || 'Database operation failed'}`);
         return;
       }
 
@@ -1608,11 +1895,13 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
         role: 'member'
       }));
 
-      // Send invitations
-      const { data, error } = await supabase
-        .from("board_invitations")
-        .insert(invitationsToSend)
-        .select();
+      // Send invitations – create if new OR update existing declined/old ones
+const { data, error } = await supabase
+.from("workspace_invitations")
+.upsert(invitationsToSend, {
+  onConflict: 'workspace_id,invited_user_id'
+})
+.select();
 
       if (error) {
         console.error("Error sending invitations:", error);
@@ -1746,6 +2035,49 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
           }
           
           console.log("Verification complete, proceeding with new invitation creation");
+          
+          // Also check and clean up any existing board invitations for this user
+          console.log("Checking for existing board invitations to clean up...");
+          const { data: existingBoardInvitations, error: boardCheckError } = await supabase
+            .from("board_invitations")
+            .select("id, status")
+            .eq("board_id", selectedBoard.id)
+            .eq("invited_user_id", user.id);
+          
+          if (boardCheckError) {
+            console.error("Error checking existing board invitations:", boardCheckError);
+            // Don't fail the process, just log the error
+          } else if (existingBoardInvitations && existingBoardInvitations.length > 0) {
+            console.log("Found existing board invitations to clean up:", existingBoardInvitations);
+            
+            // Delete or update existing board invitations
+            for (const boardInv of existingBoardInvitations) {
+              const { error: deleteBoardError } = await supabase
+                .from("board_invitations")
+                .delete()
+                .eq("id", boardInv.id);
+              
+              if (deleteBoardError) {
+                console.error("Error deleting old board invitation:", deleteBoardError);
+                // Try updating status instead
+                const { error: updateBoardError } = await supabase
+                  .from("board_invitations")
+                  .update({ 
+                    status: 'cancelled',
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq("id", boardInv.id);
+                
+                if (updateBoardError) {
+                  console.error("Error updating board invitation status:", updateBoardError);
+                } else {
+                  console.log("Successfully updated old board invitation status to cancelled");
+                }
+              } else {
+                console.log("Successfully deleted old board invitation");
+              }
+            }
+          }
         } else {
           // Handle any other status
           console.log("Found invitation with status:", existingInvitation.status);
@@ -1754,74 +2086,8 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
         }
       }
 
-      // Also check for existing board invitation
-      const { data: existingBoardInvitation, error: boardCheckError } = await supabase
-        .from("board_invitations")
-        .select("id, status")
-        .eq("board_id", selectedBoard.id)
-        .eq("invited_user_id", user.id)
-        .maybeSingle();
-
-      if (boardCheckError) {
-        console.error("Error checking existing board invitation:", boardCheckError);
-        setError("Failed to check existing board invitations. Please try again.");
-        return;
-      }
-
-      if (existingBoardInvitation) {
-        console.log("Found existing board invitation:", existingBoardInvitation);
-        if (existingBoardInvitation.status === 'pending') {
-          setError("This user already has a pending invitation to this board.");
-          return;
-        } else if (existingBoardInvitation.status === 'accepted') {
-          setError("This user is already a member of this board.");
-          return;
-        } else if (existingBoardInvitation.status === 'declined' || existingBoardInvitation.status === 'cancelled' || existingBoardInvitation.status === 'removed') {
-          // Allow re-inviting declined/cancelled/removed users - delete the old invitation first
-          console.log("User previously declined/cancelled/removed board invitation, deleting old invitation");
-          console.log("Deleting board invitation with ID:", existingBoardInvitation.id);
-          
-          const { error: deleteBoardError } = await supabase
-            .from("board_invitations")
-            .delete()
-            .eq("id", existingBoardInvitation.id);
-          
-          if (deleteBoardError) {
-            console.error("Error deleting old board invitation:", deleteBoardError);
-            console.error("Delete board error details:", {
-              code: deleteBoardError.code,
-              message: deleteBoardError.message,
-              details: deleteBoardError.details,
-              hint: deleteBoardError.hint
-            });
-            
-            // If deletion fails, try updating the status instead
-            console.log("Board invitation deletion failed, trying to update status instead...");
-            const { error: updateBoardError } = await supabase
-              .from("board_invitations")
-              .update({ 
-                status: 'cancelled',
-                updated_at: new Date().toISOString()
-              })
-              .eq("id", existingBoardInvitation.id);
-            
-            if (updateBoardError) {
-              console.error("Error updating board invitation status:", updateBoardError);
-              setError("Failed to handle old board invitation. Please try again.");
-              return;
-            }
-            
-            console.log("Successfully updated old board invitation status to cancelled");
-          } else {
-            console.log("Successfully deleted old board invitation");
-          }
-        } else {
-          // Handle any other status
-          console.log("Found board invitation with status:", existingBoardInvitation.status);
-          setError(`This user already has a board invitation with status: ${existingBoardInvitation.status}`);
-          return;
-        }
-      }
+      // Note: We've already checked and cleaned up existing board invitations above
+      // Now we can proceed with creating the new combined invitation
 
       // Create a single combined invitation by storing board info in workspace invitation
       // We'll use a special format in the role field to indicate it's a combined invitation
@@ -1829,29 +2095,46 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
         workspace_id: parseInt(workspaceId),
         invited_user_id: user.id,
         invited_by_user_id: currentUser.id,
-        role: `member+board:${selectedBoard.id}`,
+        role: 'member', // Use standard role to avoid constraint violation
         status: 'pending'
       });
       
-      let combinedInvitation, combinedError;
-      try {
-        const result = await supabase
-          .from("workspace_invitations")
+      // Create workspace invitation with standard role
+      const { data: combinedInvitation, error: combinedError } = await supabase
+        .from("workspace_invitations")
+        .insert([{
+          workspace_id: parseInt(workspaceId),
+          invited_user_id: user.id,
+          invited_by_user_id: currentUser.id,
+          role: 'member', // Use standard role to avoid constraint violation
+          status: 'pending'
+        }])
+        .select()
+        .single();
+
+      // If workspace invitation is successful, create a board invitation with a special marker
+      if (!combinedError && combinedInvitation) {
+        console.log("Workspace invitation created successfully, creating board invitation with combined marker");
+        
+        // Create board invitation with standard role to indicate it's combined
+        const { data: boardInvitation, error: boardError } = await supabase
+          .from("board_invitations")
           .insert([{
-            workspace_id: parseInt(workspaceId),
+            board_id: parseInt(selectedBoard.id),
             invited_user_id: user.id,
             invited_by_user_id: currentUser.id,
-            role: `member+board:${selectedBoard.id}`, // Special format to indicate combined invitation
+            role: 'member', // Use standard role to avoid constraint violation
             status: 'pending'
           }])
           .select()
           .single();
-        
-        combinedInvitation = result.data;
-        combinedError = result.error;
-      } catch (err) {
-        console.error("Caught exception during invitation creation:", err);
-        combinedError = err;
+
+        if (boardError) {
+          console.error("Error creating board invitation for combined invitation:", boardError);
+          // Don't fail the entire process, just log the error
+        } else {
+          console.log("Board invitation created successfully for combined invitation:", boardInvitation);
+        }
       }
 
       if (combinedError) {
@@ -1908,66 +2191,16 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
             return;
           }
 
-          // Since role constraint prevents custom format, we'll create both invitations
-          // but mark them as combined by using a special approach
-          console.log("Creating board invitation for combined display...");
-          
-          const { data: boardInvitation, error: boardError } = await supabase
-            .from("board_invitations")
-            .insert([{
-              board_id: parseInt(selectedBoard.id),
-              invited_user_id: user.id,
-              invited_by_user_id: currentUser.id,
-              role: 'member'
-            }])
-            .select()
-            .single();
-
-          if (boardError) {
-            console.error("Error sending board invitation:", boardError);
-            console.error("Board error details:", {
-              code: boardError.code,
-              message: boardError.message,
-              details: boardError.details,
-              hint: boardError.hint,
-              status: boardError.status,
-              statusText: boardError.statusText
-            });
-            // Clean up the workspace invitation if board invitation fails
-            await supabase
-              .from("workspace_invitations")
-              .delete()
-              .eq("id", workspaceInvitation.id);
-            setError(`Failed to send board invitation: ${boardError.message || 'Unknown error occurred'}`);
-            return;
-          }
-          
-          // Mark this as a combined invitation by updating the workspace invitation
-          // We'll use a special approach to link them
-          console.log("Marking as combined invitation...");
-          
-          // Success - both invitations created
-          setSuccess(`Successfully invited ${user.username} to both workspace and board! They'll be added to both when they accept the workspace invitation.`);
-          
-          // Reset state and close modal after a short delay
-          setTimeout(() => {
-            setSelectedMembers([]);
-            setSelectedBoard(null);
-            setSearchTerm("");
-            setError("");
-            setSuccess("");
-            setIsInviteModalOpen(false);
-          }, 2000);
-          return; // Exit early after successful fallback
+          // Success - workspace invitation created
+          setSuccess(`Successfully invited ${user.username} to the workspace! They'll be added to the board when they accept the workspace invitation.`);
         } else {
           setError(`Failed to send invitation: ${combinedError.message || 'Unknown error occurred. Please try again.'}`);
           return;
         }
+      } else {
+        // Success
+        setSuccess(`Successfully invited ${user.username} to both workspace and board! They'll be added to both when they accept the workspace invitation.`);
       }
-
-
-      // Success
-      setSuccess(`Successfully invited ${user.username} to both workspace and board! They'll be added to both when they accept the workspace invitation.`);
       
       // Reset state and close modal after a short delay
       setTimeout(() => {
@@ -1975,7 +2208,8 @@ function InviteMembersToBoardModal({ boards, currentUser, workspaceId, onClose }
         setSearchQuery("");
         setSearchResults([]);
         setSuccess("");
-        onClose();
+        setError("");
+        onClose(); // Use onClose prop instead of setShowInviteModal
       }, 2000);
 
     } catch (error) {
