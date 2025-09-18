@@ -106,19 +106,27 @@ function BoardsContent() {
       const userBoards = (boardsData || []).filter(board => {
         // Check if user is the board creator (owner)
         if (board.user_id === user.id) {
+          console.log("Board found as owner:", board.title, board.id);
           return true;
         }
 
         // Check if user is in the members array
         if (board.members && Array.isArray(board.members)) {
-          return board.members.some(member => 
+          const isMember = board.members.some(member => 
             member.user_id === user.id && 
             (member.role === 'owner' || member.role === 'admin' || member.role === 'member')
           );
+          if (isMember) {
+            console.log("Board found as member:", board.title, board.id, "Role:", board.members.find(m => m.user_id === user.id)?.role);
+          }
+          return isMember;
         }
 
         return false;
       });
+
+      console.log("Total boards found for user:", userBoards.length);
+      console.log("User boards:", userBoards.map(b => ({ title: b.title, id: b.id, role: b.user_id === user.id ? 'owner' : 'member' })));
 
       // Fetch user's favorite boards
       const { data: favoritesData, error: favoritesError } = await supabase

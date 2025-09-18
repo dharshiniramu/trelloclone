@@ -108,14 +108,44 @@ function WorkspaceBoardsContent() {
         setIsWorkspaceOwner(user.id === workspaceData.user_id);
       }
 
-      // Load boards for this workspace
+      // Load boards for this workspace where current user is a member
       const { data: boardsData, error: boardsError } = await supabase
         .from("boards")
         .select("*")
         .eq("workspace_id", workspaceId);
 
       if (boardsError) throw boardsError;
-      setBoards(boardsData || []);
+
+      // Filter boards where current user is owner or member
+      const userBoards = (boardsData || []).filter(board => {
+        if (!user) return false;
+        
+        // Check if user is the board creator (owner)
+        if (board.user_id === user.id) {
+          console.log("Board found as owner:", board.title, board.id);
+          return true;
+        }
+
+        // Check if user is in the members array
+        if (board.members && Array.isArray(board.members)) {
+          const isMember = board.members.some(member => 
+            member.user_id === user.id && 
+            (member.role === 'owner' || member.role === 'admin' || member.role === 'member')
+          );
+          if (isMember) {
+            console.log("Board found as member:", board.title, board.id, "Role:", board.members.find(m => m.user_id === user.id)?.role);
+          }
+          return isMember;
+        }
+
+        return false;
+      });
+
+      console.log("Total boards in workspace:", boardsData?.length || 0);
+      console.log("Boards user has access to:", userBoards.length);
+      console.log("User boards:", userBoards.map(b => ({ title: b.title, id: b.id, role: b.user_id === user.id ? 'owner' : 'member' })));
+
+      setBoards(userBoards);
     } catch (err) {
       console.error("Error loading workspace boards:", err.message);
     } finally {

@@ -1746,6 +1746,19 @@ function AddMembersModal({ boardId, onClose }) {
     setSelectedMembers(selectedMembers.filter(member => member.id !== userId));
   };
 
+  // Helper function to check if a table exists
+  const checkTableExists = async (tableName) => {
+    try {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select("*")
+        .limit(1);
+      return !error;
+    } catch (error) {
+      return false;
+    }
+  };
+
   const addMembersToBoard = async () => {
     if (selectedMembers.length === 0) return;
 
@@ -1764,7 +1777,7 @@ function AddMembersModal({ boardId, onClose }) {
       // Get current board data to check existing members and invitations
       const { data: boardData, error: boardError } = await supabase
         .from("boards")
-        .select("members, title")
+        .select("members, title, workspace_id")
         .eq("id", boardId)
         .single();
 
@@ -1858,32 +1871,145 @@ function AddMembersModal({ boardId, onClose }) {
         return;
       }
 
-      // Create invitation objects
-      const invitationsToSend = newInvitations.map(member => ({
-        board_id: parseInt(boardId), // Ensure board_id is an integer
-        invited_user_id: member.id,
-        invited_by_user_id: user.id,
-        role: 'member'
-      }));
+      // Check if board belongs to a workspace and check workspace membership
+      let workspaceInvitations = [];
+      let boardInvitations = [];
 
-      console.log("Sending invitations:", invitationsToSend);
+      if (boardData.workspace_id) {
+        // Board belongs to a workspace - check if users are workspace members
+        // Workspace membership is tracked through workspace_invitations with status 'accepted'
+        let workspaceMemberIds = [];
+        
+        // Check if workspace_invitations table exists
+        const workspaceInvitationsTableExists = await checkTableExists("workspace_invitations");
+        
+        if (workspaceInvitationsTableExists) {
+          try {
+            const { data: workspaceMembers, error: workspaceMembersError } = await supabase
+              .from("workspace_invitations")
+              .select("invited_user_id")
+              .eq("workspace_id", boardData.workspace_id)
+              .eq("status", "accepted")
+              .in("invited_user_id", newInvitations.map(m => m.id));
+
+            if (workspaceMembersError) {
+              console.error("Error checking workspace membership:", workspaceMembersError);
+              // If the table doesn't exist or has issues, treat all users as non-members
+              console.log("Treating all users as non-workspace members due to error");
+              workspaceMemberIds = [];
+            } else {
+              workspaceMemberIds = workspaceMembers?.map(m => m.invited_user_id) || [];
+            }
+          } catch (error) {
+            console.error("Error checking workspace membership:", error);
+            // If there's an error, treat all users as non-members to be safe
+            console.log("Treating all users as non-workspace members due to error");
+            workspaceMemberIds = [];
+          }
+        } else {
+          console.log("workspace_invitations table doesn't exist, treating all users as non-workspace members");
+          workspaceMemberIds = [];
+        }
+        
+        // Separate users who need workspace invitation vs those who don't
+        const needWorkspaceInvitation = newInvitations.filter(member => 
+          !workspaceMemberIds.includes(member.id)
+        );
+        const alreadyInWorkspace = newInvitations.filter(member => 
+          workspaceMemberIds.includes(member.id)
+        );
+
+        // Create workspace invitations for users not in workspace (these will be combined invitations)
+        if (needWorkspaceInvitation.length > 0) {
+          workspaceInvitations = needWorkspaceInvitation.map(member => ({
+            workspace_id: parseInt(boardData.workspace_id),
+            invited_user_id: member.id,
+            invited_by_user_id: user.id,
+            role: 'member', // Use standard role to avoid constraint violation
+            status: 'pending'
+          }));
+        }
+
+        // Create board invitations for users who are already in the workspace
+        if (alreadyInWorkspace.length > 0) {
+          boardInvitations = alreadyInWorkspace.map(member => ({
+            board_id: parseInt(boardId),
+            invited_user_id: member.id,
+            invited_by_user_id: user.id,
+            role: 'member'
+          }));
+        }
+
+        // For combined invitations, we need to create board invitations for the acceptance logic
+        // but we'll filter them out in the UI display
+        if (needWorkspaceInvitation.length > 0) {
+          const combinedBoardInvitations = needWorkspaceInvitation.map(member => ({
+            board_id: parseInt(boardId),
+            invited_user_id: member.id,
+            invited_by_user_id: user.id,
+            role: 'member'
+          }));
+          
+          // Add combined board invitations to the main board invitations array
+          boardInvitations = [...boardInvitations, ...combinedBoardInvitations];
+        }
+      } else {
+        // Board doesn't belong to a workspace - just create board invitations
+        boardInvitations = newInvitations.map(member => ({
+          board_id: parseInt(boardId),
+          invited_user_id: member.id,
+          invited_by_user_id: user.id,
+          role: 'member'
+        }));
+      }
+
+      console.log("Sending invitations:", { workspaceInvitations, boardInvitations });
       console.log("Board ID:", boardId);
       console.log("Current user ID:", user.id);
 
       // Validate data before sending
-      if (!boardId || !user.id || invitationsToSend.length === 0) {
+      if (!boardId || !user.id || (workspaceInvitations.length === 0 && boardInvitations.length === 0)) {
         setError("Invalid data for sending invitations. Please try again.");
         return;
       }
 
-      // Send invitations
+      // Send workspace invitations if any
+      if (workspaceInvitations.length > 0) {
+        const workspaceInvitationsTableExists = await checkTableExists("workspace_invitations");
+        
+        if (workspaceInvitationsTableExists) {
+          try {
+            const { data: workspaceData, error: workspaceError } = await supabase
+              .from("workspace_invitations")
+              .insert(workspaceInvitations)
+              .select();
+
+            if (workspaceError) {
+              console.error("Error sending workspace invitations:", workspaceError);
+              // If workspace invitations fail, we can still send board invitations
+              console.log("Workspace invitations failed, but continuing with board invitations");
+              // Don't return here, continue with board invitations
+            } else {
+              console.log("Workspace invitations sent successfully:", workspaceData);
+            }
+          } catch (error) {
+            console.error("Error sending workspace invitations:", error);
+            console.log("Workspace invitations failed, but continuing with board invitations");
+            // Don't return here, continue with board invitations
+          }
+        } else {
+          console.log("workspace_invitations table doesn't exist, skipping workspace invitations");
+        }
+      }
+
+      // Send board invitations
       const { data, error } = await supabase
         .from("board_invitations")
-        .insert(invitationsToSend)
+        .insert(boardInvitations)
         .select();
 
       if (error) {
-        console.error("Error sending invitations:", error);
+        console.error("Error sending board invitations:", error);
         console.error("Error details:", {
           code: error.code,
           message: error.message,
@@ -1907,7 +2033,16 @@ function AddMembersModal({ boardId, onClose }) {
       }
 
       // Success
-      setSuccess(`Successfully sent ${invitationsToSend.length} invitation${invitationsToSend.length !== 1 ? 's' : ''} to join "${boardData.title}"!`);
+      const totalInvitations = workspaceInvitations.length + boardInvitations.length;
+      let successMessage = `Successfully sent ${totalInvitations} invitation${totalInvitations !== 1 ? 's' : ''} to join "${boardData.title}"!`;
+      
+      if (workspaceInvitations.length > 0 && boardInvitations.length > 0) {
+        successMessage = `Successfully sent ${workspaceInvitations.length} workspace invitation${workspaceInvitations.length !== 1 ? 's' : ''} and ${boardInvitations.length} board invitation${boardInvitations.length !== 1 ? 's' : ''} to join "${boardData.title}"!`;
+      } else if (workspaceInvitations.length > 0) {
+        successMessage = `Successfully sent ${workspaceInvitations.length} workspace invitation${workspaceInvitations.length !== 1 ? 's' : ''} to join "${boardData.title}"!`;
+      }
+      
+      setSuccess(successMessage);
       
       // Reset state and close modal after a short delay
       setTimeout(() => {

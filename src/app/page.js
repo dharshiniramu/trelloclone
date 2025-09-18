@@ -13,6 +13,7 @@ import {
   Check,
   X,
   Mail,
+  Layout,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -340,9 +341,12 @@ function AuthenticatedHome({ username }) {
       if (action === 'accept') {
         if (type === 'board') {
           // Use the database function to accept board invitation
+          console.log("Accepting board invitation with ID:", invitationId);
           const { data, error } = await supabase.rpc('accept_board_invitation', {
             invitation_id: invitationId
           });
+
+          console.log("Board invitation acceptance result:", { data, error });
 
           if (error) {
             console.error("Error accepting board invitation:", error);
@@ -354,13 +358,20 @@ function AuthenticatedHome({ username }) {
             // Remove the invitation from the list
             setBoardInvitations(prev => prev.filter(inv => inv.id !== invitationId));
             alert("Successfully joined the board!");
+            // Refresh the page to show the new board in the boards list
+            window.location.reload();
           } else {
             alert("Failed to accept invitation. It may have already been processed.");
           }
         } else if (type === 'workspace') {
-          // Check if this is a combined invitation
+          // Check if this is a combined invitation by looking for a corresponding board invitation
           const invitation = workspaceInvitations.find(inv => inv.id === invitationId);
-          const isCombined = invitation?.invitation_type === 'combined' && invitation?.board_id;
+          const isCombined = boardInvitations.some(boardInv => 
+            boardInv.invited_user_id === invitation.invited_user_id
+          );
+          const boardId = isCombined ? boardInvitations.find(boardInv => 
+            boardInv.invited_user_id === invitation.invited_user_id
+          )?.board_id : null;
           
           if (isCombined) {
             // Handle combined invitation - accept both workspace and board
@@ -378,52 +389,79 @@ function AuthenticatedHome({ username }) {
             }
 
             if (workspaceData) {
-              // Get board ID from the invitation data
-              let boardId = invitation.board_id;
-              
-              // If no board_id in invitation data, try to extract from role field
-              if (!boardId && invitation.role && invitation.role.includes('+board:')) {
-                boardId = invitation.role.split('+board:')[1];
-              }
+              // Board ID is already extracted from role field above
               
               if (boardId) {
-                // Now add the user to the board
-                const { data: boardData, error: boardError } = await supabase
-                  .from("boards")
-                  .select("members")
-                  .eq("id", boardId)
-                  .single();
+                // Find the corresponding board invitation
+                const boardInvitation = boardInvitations.find(boardInv => 
+                  boardInv.invited_user_id === invitation.invited_user_id && 
+                  boardInv.board_id === boardId
+                );
 
-                if (boardError) {
-                  console.error("Error fetching board data:", boardError);
-                  alert("Joined workspace but failed to add to board. Please contact support.");
-                  return;
-              }
+                if (boardInvitation) {
+                  // Accept the board invitation using the database function
+                  const { data: boardAcceptData, error: boardAcceptError } = await supabase.rpc('accept_board_invitation', {
+                    invitation_id: boardInvitation.id
+                  });
 
-              // Add user to board members
-              const currentMembers = boardData.members || [];
-              const newMember = {
-                user_id: invitation.invited_user_id,
-                role: 'member',
-                added_at: new Date().toISOString()
-              };
+                  if (boardAcceptError) {
+                    console.error("Error accepting board invitation:", boardAcceptError);
+                    alert("Joined workspace but failed to accept board invitation. Please contact support.");
+                    return;
+                  }
 
-              const { error: updateBoardError } = await supabase
-                .from("boards")
-                .update({ 
-                  members: [...currentMembers, newMember]
-                })
-                .eq("id", boardId);
+                  if (boardAcceptData) {
+                    // Remove both invitations from the lists
+                    setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+                    setBoardInvitations(prev => prev.filter(inv => inv.id !== boardInvitation.id));
+                    alert(`Successfully joined the workspace "${invitation.workspaces?.name}" and board!`);
+                    // Refresh the page to show the new board in the boards list
+                    window.location.reload();
+                  } else {
+                    alert("Failed to accept board invitation. Please try again.");
+                    return;
+                  }
+                } else {
+                  // Fallback: manually add user to board if board invitation not found
+                  const { data: boardData, error: boardError } = await supabase
+                    .from("boards")
+                    .select("members")
+                    .eq("id", boardId)
+                    .single();
 
-              if (updateBoardError) {
-                console.error("Error adding user to board:", updateBoardError);
-                alert("Joined workspace but failed to add to board. Please contact support.");
-                return;
-              }
+                  if (boardError) {
+                    console.error("Error fetching board data:", boardError);
+                    alert("Joined workspace but failed to add to board. Please contact support.");
+                    return;
+                  }
 
-              // Remove the invitation from the list
-              setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-              alert(`Successfully joined the workspace "${invitation.workspaces?.name}" and board "${invitation.boards?.title}"!`);
+                  // Add user to board members
+                  const currentMembers = boardData.members || [];
+                  const newMember = {
+                    user_id: invitation.invited_user_id,
+                    role: 'member',
+                    added_at: new Date().toISOString()
+                  };
+
+                  const { error: updateBoardError } = await supabase
+                    .from("boards")
+                    .update({ 
+                      members: [...currentMembers, newMember]
+                    })
+                    .eq("id", boardId);
+
+                  if (updateBoardError) {
+                    console.error("Error adding user to board:", updateBoardError);
+                    alert("Joined workspace but failed to add to board. Please contact support.");
+                    return;
+                  }
+
+                  // Remove the invitation from the list
+                  setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+                  alert(`Successfully joined the workspace "${invitation.workspaces?.name}" and board!`);
+                  // Refresh the page to show the new board in the boards list
+                  window.location.reload();
+                }
               } else {
                 // Regular workspace invitation (no board)
                 setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
@@ -444,12 +482,14 @@ function AuthenticatedHome({ username }) {
             return;
           }
 
-          if (data) {
-            // Remove the invitation from the list
-            setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-            alert("Successfully joined the workspace!");
-          } else {
-            alert("Failed to accept invitation. It may have already been processed.");
+            if (data) {
+              // Remove the invitation from the list
+              setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
+              alert("Successfully joined the workspace!");
+              // Refresh the page to show any new boards
+              window.location.reload();
+            } else {
+              alert("Failed to accept invitation. It may have already been processed.");
             }
           }
         }
@@ -534,14 +574,29 @@ function AuthenticatedHome({ username }) {
             </div>
           ) : (
             <div className="space-y-6 animate-fade-in-up">
-              {/* Board Invitations */}
-              {boardInvitations.length > 0 && (
+      {/* Board Invitations */}
+      {boardInvitations.filter(invitation => {
+        // Filter out board invitations that have corresponding workspace invitations (combined invitations)
+        return !workspaceInvitations.some(wsInv =>
+          wsInv.invited_user_id === invitation.invited_user_id
+        );
+      }).length > 0 && (
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                    Board Invitations ({boardInvitations.length})
+                    Board Invitations ({boardInvitations.filter(invitation => {
+                      // Filter out board invitations that have corresponding workspace invitations (combined invitations)
+                      return !workspaceInvitations.some(wsInv =>
+                        wsInv.invited_user_id === invitation.invited_user_id
+                      );
+                    }).length})
                   </h2>
                   <div className="space-y-4">
-                    {boardInvitations.map((invitation) => (
+                    {boardInvitations.filter(invitation => {
+                      // Filter out board invitations that have corresponding workspace invitations (combined invitations)
+                      return !workspaceInvitations.some(wsInv =>
+                        wsInv.invited_user_id === invitation.invited_user_id
+                      );
+                    }).map((invitation) => (
                       <div
                         key={`board-${invitation.id}`}
                         className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
@@ -603,32 +658,40 @@ function AuthenticatedHome({ username }) {
                   </h2>
                   <div className="space-y-4">
                     {workspaceInvitations.map((invitation) => {
-                      // Check if this is a combined invitation by looking at the role field
-                      const isCombined = invitation.role && invitation.role.includes('+board:');
-                      const boardId = isCombined ? invitation.role.split('+board:')[1] : null;
+                      // Check if this is a combined invitation by looking for a corresponding board invitation
+                      // We'll check if there's a board invitation for the same user
+                      const isCombined = boardInvitations.some(boardInv => 
+                        boardInv.invited_user_id === invitation.invited_user_id
+                      );
+                      const boardId = isCombined ? boardInvitations.find(boardInv => 
+                        boardInv.invited_user_id === invitation.invited_user_id
+                      )?.board_id : null;
+                      const boardTitle = isCombined ? boardInvitations.find(boardInv =>
+                        boardInv.invited_user_id === invitation.invited_user_id
+                      )?.boards?.title || 'Unknown Board' : null;
                       return (
                       <div
                         key={`workspace-${invitation.id}`}
                           className={`bg-white border rounded-xl p-6 hover:shadow-md transition-shadow duration-200 ${
                             isCombined 
-                              ? 'border-purple-200 bg-gradient-to-r from-purple-50 to-indigo-50' 
-                              : 'border-gray-200'
+                              ? 'border-purple-300 bg-gradient-to-r from-purple-50 to-indigo-50 shadow-purple-100' 
+                              : 'border-green-200 bg-green-50'
                           }`}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex items-start space-x-4">
                               <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
                                 isCombined 
-                                  ? 'bg-purple-100' 
-                                  : 'bg-green-100'
+                                  ? 'bg-gradient-to-r from-purple-500 to-indigo-500' 
+                                  : 'bg-green-500'
                               }`}>
                                 {isCombined ? (
                                   <div className="flex items-center space-x-1">
-                                    <Users className="h-4 w-4 text-purple-600" />
-                                    <Layout className="h-4 w-4 text-purple-600" />
+                                    <Users className="h-4 w-4 text-white" />
+                                    <Layout className="h-4 w-4 text-white" />
                                   </div>
                                 ) : (
-                              <Users className="h-6 w-6 text-green-600" />
+                              <Users className="h-6 w-6 text-white" />
                                 )}
                             </div>
                             <div className="flex-1">
@@ -642,7 +705,7 @@ function AuthenticatedHome({ username }) {
                                   {isCombined ? (
                                     <>
                                       the workspace <span className="font-bold text-xl text-purple-600">"{invitation.workspaces?.name}"</span>
-                                      {' '}and board <span className="font-bold text-xl text-indigo-600">"{invitation.boards?.title}"</span>
+                                      {' '}and board <span className="font-bold text-xl text-indigo-600">"{boardTitle}"</span>
                                     </>
                                   ) : (
                                     <>
@@ -669,7 +732,11 @@ function AuthenticatedHome({ username }) {
                             <button
                               onClick={() => handleInvitationResponse(invitation.id, 'accept', 'workspace')}
                               disabled={processing === invitation.id}
-                              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              className={`flex items-center px-4 py-2 text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 ${
+                                isCombined 
+                                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600' 
+                                  : 'bg-green-600 hover:bg-green-700'
+                              }`}
                             >
                               {processing === invitation.id ? (
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
@@ -681,7 +748,11 @@ function AuthenticatedHome({ username }) {
                             <button
                               onClick={() => handleInvitationResponse(invitation.id, 'decline', 'workspace')}
                               disabled={processing === invitation.id}
-                              className="flex items-center px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              className={`flex items-center px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 ${
+                                isCombined 
+                                  ? 'bg-purple-200 text-purple-800 hover:bg-purple-300' 
+                                  : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+                              }`}
                             >
                               <X className="h-4 w-4 mr-2" />
                               Decline
