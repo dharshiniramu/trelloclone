@@ -97,8 +97,6 @@ export default function Home() {
 function AuthenticatedHome({ username }) {
   const [boardInvitations, setBoardInvitations] = useState([]);
   const [workspaceInvitations, setWorkspaceInvitations] = useState([]);
-  const [acceptedBoardInvitations, setAcceptedBoardInvitations] = useState([]);
-  const [acceptedWorkspaceInvitations, setAcceptedWorkspaceInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [tableError, setTableError] = useState(false);
@@ -109,9 +107,6 @@ function AuthenticatedHome({ username }) {
       try {
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (userError || !user) return;
-
-        // Mark notifications as viewed when user visits the page
-        localStorage.setItem(`notifications_viewed_${user.id}`, new Date().getTime().toString());
 
         // Fetch board invitations
         const { data: boardInvitationsData, error: boardInvitationsError } = await supabase
@@ -141,37 +136,6 @@ function AuthenticatedHome({ username }) {
           .eq("invited_user_id", user.id)
           .eq("status", "pending")
           .order("created_at", { ascending: false });
-
-        // Fetch accepted board invitations
-        const { data: acceptedBoardInvitationsData, error: acceptedBoardInvitationsError } = await supabase
-          .from("board_invitations")
-          .select(`
-            id,
-            board_id,
-            role,
-            created_at,
-            responded_at,
-            invited_by_user_id,
-            boards(title)
-          `)
-          .eq("invited_user_id", user.id)
-          .eq("status", "accepted")
-          .order("responded_at", { ascending: false });
-
-        // Fetch accepted workspace invitations
-        const { data: acceptedWorkspaceInvitationsData, error: acceptedWorkspaceInvitationsError } = await supabase
-          .from("workspace_invitations")
-          .select(`
-            id,
-            workspace_id,
-            role,
-            created_at,
-            responded_at,
-            invited_by_user_id
-          `)
-          .eq("invited_user_id", user.id)
-          .eq("status", "accepted")
-          .order("responded_at", { ascending: false });
 
         // Handle board invitations
         if (boardInvitationsError) {
@@ -303,57 +267,8 @@ function AuthenticatedHome({ username }) {
           setWorkspaceInvitations(workspaceInvitationsWithNames);
         }
 
-        // Handle accepted board invitations
-        if (acceptedBoardInvitationsError) {
-          console.error("Error fetching accepted board invitations:", acceptedBoardInvitationsError);
-          setAcceptedBoardInvitations([]);
-        } else {
-          setAcceptedBoardInvitations(acceptedBoardInvitationsData || []);
-        }
-
-        // Handle accepted workspace invitations
-        if (acceptedWorkspaceInvitationsError) {
-          console.error("Error fetching accepted workspace invitations:", acceptedWorkspaceInvitationsError);
-          setAcceptedWorkspaceInvitations([]);
-        } else {
-          // Fetch workspace names for accepted invitations
-          let acceptedWorkspaceInvitationsWithNames = acceptedWorkspaceInvitationsData || [];
-          if (acceptedWorkspaceInvitationsWithNames.length > 0) {
-            try {
-              const workspaceIds = acceptedWorkspaceInvitationsWithNames
-                .map(inv => inv.workspace_id)
-                .filter(id => id !== null);
-              
-              if (workspaceIds.length > 0) {
-                const { data: workspaces, error: workspacesError } = await supabase
-                  .from("workspaces")
-                  .select("id, name")
-                  .in("id", workspaceIds);
-
-                if (!workspacesError && workspaces) {
-                  acceptedWorkspaceInvitationsWithNames = acceptedWorkspaceInvitationsWithNames.map(invitation => {
-                    const workspace = workspaces.find(w => w.id === invitation.workspace_id);
-                    return {
-                      ...invitation,
-                      workspaces: workspace ? { name: workspace.name } : null
-                    };
-                  });
-                }
-              }
-            } catch (err) {
-              console.error("Error fetching workspace names for accepted invitations:", err);
-            }
-          }
-          setAcceptedWorkspaceInvitations(acceptedWorkspaceInvitationsWithNames);
-        }
-
         // Get usernames for all inviters
-        const allInvitations = [
-          ...(boardInvitationsData || []), 
-          ...(workspaceInvitationsData || []),
-          ...(acceptedBoardInvitationsData || []),
-          ...(acceptedWorkspaceInvitationsData || [])
-        ];
+        const allInvitations = [...(boardInvitationsData || []), ...(workspaceInvitationsData || [])];
         if (allInvitations.length > 0) {
           const inviterIds = [...new Set(allInvitations.map(inv => inv.invited_by_user_id))];
           const { data: profiles, error: profilesError } = await supabase
@@ -375,6 +290,11 @@ function AuthenticatedHome({ username }) {
               inviter_username: profiles.find(p => p.id === invitation.invited_by_user_id)?.username || 'Unknown User'
             }));
             setWorkspaceInvitations(workspaceInvitationsWithUsernames);
+          } else {
+            // If profile fetching fails, still set the invitations without usernames
+            console.log("Profile fetching failed, setting invitations without usernames");
+            setBoardInvitations(boardInvitationsData || []);
+            setWorkspaceInvitations(workspaceInvitationsWithNames);
           }
         } else {
           // If no invitations, ensure empty arrays are set
@@ -385,8 +305,6 @@ function AuthenticatedHome({ username }) {
         console.error("Error fetching invitations:", error);
         setBoardInvitations([]);
         setWorkspaceInvitations([]);
-        setAcceptedBoardInvitations([]);
-        setAcceptedWorkspaceInvitations([]);
       } finally {
         setLoading(false);
       }
@@ -581,7 +499,7 @@ function AuthenticatedHome({ username }) {
                 Run the SQL script from setup_board_members_table.sql in your Supabase SQL Editor
               </div>
             </div>
-          ) : (boardInvitations.length === 0 && workspaceInvitations.length === 0 && acceptedBoardInvitations.length === 0 && acceptedWorkspaceInvitations.length === 0) ? (
+          ) : (boardInvitations.length === 0 && workspaceInvitations.length === 0) ? (
             <div className="bg-white border border-gray-200 rounded-xl p-10 text-center animate-fade-in-up">
               <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
                 <Bell className="h-7 w-7 text-blue-600" />
@@ -755,78 +673,6 @@ function AuthenticatedHome({ username }) {
                   </div>
                 </div>
               )}
-
-              {/* Accepted Notifications Section */}
-              {(acceptedBoardInvitations.length > 0 || acceptedWorkspaceInvitations.length > 0) && (
-                <div className="mt-8">
-                  <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                    <Check className="h-5 w-5 text-green-600 mr-2" />
-                    Accepted Notifications
-                  </h2>
-                  
-                  <div className="space-y-4">
-                    {/* Accepted Board Invitations */}
-                    {acceptedBoardInvitations.map((invitation) => (
-                      <div
-                        key={`accepted-board-${invitation.id}`}
-                        className="bg-green-50 border border-green-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                              <Check className="h-6 w-6 text-green-600" />
-                            </div>
-                            <div className="flex-1">
-                              <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                                Board Invitation Accepted
-                              </h3>
-                              <p className="text-gray-600 mb-2">
-                                You accepted the invitation from <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> to join the board{' '}
-                                <span className="font-medium text-green-600">"{invitation.boards?.title}"</span>
-                              </p>
-                              <div className="flex items-center space-x-4 text-sm text-gray-500">
-                                <span>Role: {invitation.role}</span>
-                                <span>•</span>
-                                <span>Accepted: {new Date(invitation.responded_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Accepted Workspace Invitations */}
-                    {acceptedWorkspaceInvitations.map((invitation) => (
-                      <div
-                        key={`accepted-workspace-${invitation.id}`}
-                        className="bg-green-50 border border-green-200 rounded-xl p-6 hover:shadow-md transition-shadow duration-200"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                              <Check className="h-6 w-6 text-green-600" />
-                            </div>
-                            <div className="flex-1">
-                              <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                                Workspace Invitation Accepted
-                              </h3>
-                              <p className="text-gray-600 mb-2">
-                                You accepted the invitation from <span className="font-medium">{invitation.inviter_username || 'Someone'}</span> to join the workspace{' '}
-                                <span className="font-medium text-green-600">"{invitation.workspaces?.name}"</span>
-                              </p>
-                              <div className="flex items-center space-x-4 text-sm text-gray-500">
-                                <span>Role: {invitation.role}</span>
-                                <span>•</span>
-                                <span>Accepted: {new Date(invitation.responded_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -896,7 +742,7 @@ function GuestLanding({ loading }) {
                 </h3>
                 <p className="text-gray-600">
                   Create, organize, and track tasks with ease. Use boards,
-                  lists, and cards to visualize your workflow.
+                  lists,  and cards to visualize your workflow.
                 </p>
               </div>
 

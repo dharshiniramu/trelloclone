@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, FolderOpen, Layout, Trash, X, Star, Users, Edit } from "lucide-react";
+import { Plus, FolderOpen, Layout, Trash, X, Star, Users } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 // ✅ Categories with 4 sample images each
@@ -14,7 +14,7 @@ const TEMPLATE_CATEGORIES = {
       "/ptemp1.jpg",
       "/ptemp2.png",
       "/ptemp3.jpg",
-      "/ptemp4.jpg",
+      "/ptemp4.jpg", 
     ],
   },
   productivity: {
@@ -68,8 +68,6 @@ function BoardsContent() {
   ]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
-  const [selectedBoard, setSelectedBoard] = useState(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
@@ -151,8 +149,7 @@ function BoardsContent() {
 
       const { data: wsData, error: wsError } = await supabase
         .from("workspaces")
-        .select("id, name, user_id")
-        .eq("user_id", user.id);
+        .select("id, name");
 
       if (wsError) throw wsError;
       setWorkspaces([{ id: null, name: "No workspace" }, ...(wsData || [])]);
@@ -297,29 +294,17 @@ function BoardsContent() {
                 </div>
               </div>
 
-              {/* Action buttons - only show for owners */}
+              {/* Trash delete button - only show for owners */}
               {getUserRole(b) === 'Owner' && (
-                <div className="absolute top-2 right-2 flex gap-1">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedBoard(b);
-                      setShowEdit(true);
-                    }}
-                    className="p-1 bg-white/80 hover:bg-blue-100 rounded"
-                  >
-                    <Edit className="h-4 w-4 text-blue-500" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteBoard(b.id);
-                    }}
-                    className="p-1 bg-white/80 hover:bg-red-100 rounded"
-                  >
-                    <Trash className="h-4 w-4 text-red-500" />
-                  </button>
-                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteBoard(b.id);
+                  }}
+                  className="absolute top-2 right-2 p-1 bg-white/80 hover:bg-red-100 rounded"
+                >
+                  <Trash className="h-4 w-4 text-red-500" />
+                </button>
               )}
             </div>
           ))}
@@ -331,22 +316,6 @@ function BoardsContent() {
           workspaces={workspaces}
           onClose={() => setShowCreate(false)}
           onCreated={addBoard}
-        />
-      )}
-
-      {showEdit && selectedBoard && (
-        <EditBoardModal
-          board={selectedBoard}
-          workspaces={workspaces}
-          onClose={() => {
-            setShowEdit(false);
-            setSelectedBoard(null);
-          }}
-          onUpdated={(updatedBoard) => {
-            setBoards(prev => prev.map(b => b.id === updatedBoard.id ? updatedBoard : b));
-            setShowEdit(false);
-            setSelectedBoard(null);
-          }}
         />
       )}
 
@@ -369,40 +338,18 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [error, setError] = useState("");
 
   const canSubmit = title.trim().length > 0;
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
-    setError(""); // Clear any previous errors
 
     try {
       // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
         console.error("Error getting user:", userError);
-        return;
-      }
-
-      // Check if board title already exists for this user
-      const { data: existingBoards, error: checkError } = await supabase
-        .from("boards")
-        .select("id, title")
-        .eq("user_id", user.id)
-        .ilike("title", title.trim());
-
-      if (checkError) throw checkError;
-
-      // Check if any existing board has the exact same title (case-insensitive)
-      const duplicateBoard = existingBoards?.find(board => 
-        board.title.toLowerCase() === title.trim().toLowerCase()
-      );
-
-      if (duplicateBoard) {
-        setError("Board title already exists. Please choose a different title.");
-        setSubmitting(false);
         return;
       }
 
@@ -531,20 +478,10 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           </label>
           <input
             value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              setError(""); // Clear error when user starts typing
-            }}
-            className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
-              error ? "border-red-500" : ""
-            }`}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
             placeholder="Enter board title"
           />
-          {error && (
-            <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="text-sm text-red-600">{error}</div>
-            </div>
-          )}
         </div>
 
         {/* Invite Members */}
@@ -608,187 +545,6 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           onClose={() => setShowInviteModal(false)}
         />
       )}
-    </div>
-  );
-}
-
-function EditBoardModal({ board, workspaces, onClose, onUpdated }) {
-  const [title, setTitle] = useState(board?.title || "");
-  const [workspaceId, setWorkspaceId] = useState(board?.workspace_id ?? null);
-  const [templateCategory, setTemplateCategory] = useState("personal");
-  const [selectedImage, setSelectedImage] = useState(board?.background_image || null);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-
-  const canSubmit = title.trim().length > 0;
-
-  const submit = async () => {
-    if (!canSubmit) return;
-    setSubmitting(true);
-    setError(""); // Clear any previous errors
-
-    try {
-      // Get current user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        console.error("Error getting user:", userError);
-        return;
-      }
-
-      // Check if user is the board owner
-      if (board.user_id !== user.id) {
-        console.error("Only board owners can edit boards");
-        alert("Only board owners can edit boards");
-        return;
-      }
-
-      // Check if board title already exists for this user (excluding current board)
-      const { data: existingBoards, error: checkError } = await supabase
-        .from("boards")
-        .select("id, title")
-        .eq("user_id", user.id)
-        .neq("id", board.id) // Exclude current board from check
-        .ilike("title", title.trim());
-
-      if (checkError) throw checkError;
-
-      // Check if any existing board has the exact same title (case-insensitive)
-      const duplicateBoard = existingBoards?.find(existingBoard => 
-        existingBoard.title.toLowerCase() === title.trim().toLowerCase()
-      );
-
-      if (duplicateBoard) {
-        setError("Board title already exists. Please choose a different title.");
-        setSubmitting(false);
-        return;
-      }
-
-      // Update the board
-      const { data: updatedBoard, error: boardError } = await supabase
-        .from("boards")
-        .update({
-          title: title.trim(),
-          workspace_id: workspaceId || null,
-          background_image: selectedImage || null,
-        })
-        .eq("id", board.id)
-        .select()
-        .single();
-
-      if (boardError) throw boardError;
-
-      onUpdated(updatedBoard);
-    } catch (err) {
-      console.error("Error updating board:", err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 animate-fade-in">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-xl p-6 overflow-auto animate-slide-in-right">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Edit board</h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-50 rounded transition-colors duration-200"
-          >
-            <X className="h-5 w-5 text-gray-500" />
-          </button>
-        </div>
-
-        {/* Template category */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Template category
-          </label>
-          <select
-            value={templateCategory}
-            onChange={(e) => {
-              setTemplateCategory(e.target.value);
-              setSelectedImage(null);
-            }}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-          >
-            {Object.entries(TEMPLATE_CATEGORIES).map(([key, c]) => (
-              <option key={key} value={key}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Preview images */}
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {TEMPLATE_CATEGORIES[templateCategory].images.map((img) => (
-            <div
-              key={img}
-              onClick={() => setSelectedImage(img)}
-              className={`h-16 w-full rounded-lg bg-cover bg-center cursor-pointer border-2 ${
-                selectedImage === img
-                  ? "border-blue-500"
-                  : "border-transparent"
-              }`}
-              style={{ backgroundImage: `url(${img})` }}
-            />
-          ))}
-        </div>
-
-        {/* Workspace */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Workspace name
-          </label>
-          <select
-            value={workspaceId ?? ""}
-            onChange={(e) =>
-              setWorkspaceId(
-                e.target.value === "" ? null : Number(e.target.value)
-              )
-            }
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-          >
-            {workspaces.map((w) => (
-              <option key={String(w.id)} value={w.id ?? ""}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Title */}
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Board title <span className="text-red-500">*</span>
-          </label>
-          <input
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              setError(""); // Clear error when user starts typing
-            }}
-            className={`w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
-              error ? "border-red-500" : ""
-            }`}
-            placeholder="Enter board title"
-          />
-          {error && (
-            <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="text-sm text-red-600">{error}</div>
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={submit}
-          disabled={!canSubmit || submitting}
-          className="w-full bg-blue-600 text-white py-2 rounded-lg disabled:opacity-50 transition-all duration-200 hover:bg-blue-700 hover:shadow-lg"
-        >
-          {submitting ? "Saving..." : "Save"}
-        </button>
-      </div>
     </div>
   );
 }
