@@ -108,14 +108,33 @@ function WorkspaceBoardsContent() {
         setIsWorkspaceOwner(user.id === workspaceData.user_id);
       }
 
-      // Load boards for this workspace
+      // Load boards for this workspace where user is a member
       const { data: boardsData, error: boardsError } = await supabase
         .from("boards")
         .select("*")
         .eq("workspace_id", workspaceId);
 
       if (boardsError) throw boardsError;
-      setBoards(boardsData || []);
+
+      // Filter boards where user is owner or member
+      const userBoards = (boardsData || []).filter(board => {
+        // Check if user is the board creator (owner)
+        if (board.user_id === user.id) {
+          return true;
+        }
+
+        // Check if user is in the members array
+        if (board.members && Array.isArray(board.members)) {
+          return board.members.some(member => 
+            member.user_id === user.id && 
+            (member.role === 'owner' || member.role === 'admin' || member.role === 'member')
+          );
+        }
+
+        return false;
+      });
+
+      setBoards(userBoards);
     } catch (err) {
       console.error("Error loading workspace boards:", err.message);
     } finally {
@@ -2779,74 +2798,13 @@ function InviteMembersModal({ selectedMembers, setSelectedMembers, onClose, work
 
       setIsOwnerSearch(false);
 
-      // Search for other users - try multiple approaches
-      let profiles = [];
-      let profilesError = null;
+      // Only search within workspace members
+      const filteredMembers = workspaceMembers.filter(member => 
+        member.username?.toLowerCase().includes(query.toLowerCase()) ||
+        member.email?.toLowerCase().includes(query.toLowerCase())
+      );
 
-      // First, try to search with both username and email
-      const { data: searchResults, error: searchError } = await supabase
-        .from("profiles")
-        .select("id, username, email")
-        .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
-        .limit(10);
-
-      if (searchError) {
-        // If email column doesn't exist, fallback to username only
-        if (searchError.code === '42703') {
-          const { data: usernameResults, error: usernameError } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .ilike("username", `%${query}%`)
-            .limit(10);
-
-          if (!usernameError && usernameResults) {
-            profiles = usernameResults.map(p => ({ ...p, email: null }));
-          }
-        } else {
-          // For other errors, try username search only
-          const { data: usernameResults, error: usernameError } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .ilike("username", `%${query}%`)
-            .limit(10);
-
-          if (!usernameError && usernameResults) {
-            profiles = usernameResults.map(p => ({ ...p, email: null }));
-          }
-        }
-      } else if (searchResults) {
-        profiles = searchResults;
-      }
-
-      // If no results with the OR query, try separate searches
-      if (profiles.length === 0) {
-        // Try username search
-        const { data: usernameResults, error: usernameError } = await supabase
-          .from("profiles")
-          .select("id, username, email")
-          .ilike("username", `%${query}%`)
-          .limit(5);
-
-        if (!usernameError && usernameResults) {
-          profiles = [...profiles, ...usernameResults];
-        }
-
-        // Try email search (if email column exists)
-        const { data: emailResults, error: emailError } = await supabase
-          .from("profiles")
-          .select("id, username, email")
-          .ilike("email", `%${query}%`)
-          .limit(5);
-
-        if (!emailError && emailResults) {
-          // Merge results, avoiding duplicates
-          const existingIds = profiles.map(p => p.id);
-          const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
-          profiles = [...profiles, ...newEmailResults];
-        }
-      }
-
-      setSearchResults(profiles);
+      setSearchResults(filteredMembers);
     } catch (error) {
       console.error("Error searching users:", error);
       setSearchResults([]);
@@ -2904,7 +2862,7 @@ function InviteMembersModal({ selectedMembers, setSelectedMembers, onClose, work
               onFocus={() => setShowDropdown(true)}
               onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Search workspace members or type to search all users..."
+              placeholder="Search workspace members..."
             />
             {loading && (
               <div className="absolute right-3 top-3">

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, FolderOpen, Layout, Trash, X, Star, Users } from "lucide-react";
+import { Plus, FolderOpen, Layout, Trash, X, Star, Users, Edit } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 // ✅ Categories with 4 sample images each
@@ -63,12 +63,12 @@ export default function BoardsPage() {
 function BoardsContent() {
   const router = useRouter();
   const [boards, setBoards] = useState([]);
-  const [workspaces, setWorkspaces] = useState([
-    { id: null, name: "No workspace" },
-  ]);
+  const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingBoard, setEditingBoard] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
 
   // Helper function to get user's role in a board
@@ -147,9 +147,11 @@ function BoardsContent() {
 
       setBoards(sortedBoards);
 
+      // Only fetch workspaces where the current user is the owner
       const { data: wsData, error: wsError } = await supabase
         .from("workspaces")
-        .select("id, name");
+        .select("id, name")
+        .eq("user_id", user.id);
 
       if (wsError) throw wsError;
       setWorkspaces([{ id: null, name: "No workspace" }, ...(wsData || [])]);
@@ -294,17 +296,31 @@ function BoardsContent() {
                 </div>
               </div>
 
-              {/* Trash delete button - only show for owners */}
+              {/* Action buttons - only show for owners */}
               {getUserRole(b) === 'Owner' && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteBoard(b.id);
-                  }}
-                  className="absolute top-2 right-2 p-1 bg-white/80 hover:bg-red-100 rounded"
-                >
-                  <Trash className="h-4 w-4 text-red-500" />
-                </button>
+                <div className="absolute top-2 right-2 flex gap-1">
+                  {/* Edit button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingBoard(b);
+                      setShowEditModal(true);
+                    }}
+                    className="p-1 bg-white/80 hover:bg-blue-100 rounded"
+                  >
+                    <Edit className="h-4 w-4 text-blue-500" />
+                  </button>
+                  {/* Delete button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteBoard(b.id);
+                    }}
+                    className="p-1 bg-white/80 hover:bg-red-100 rounded"
+                  >
+                    <Trash className="h-4 w-4 text-red-500" />
+                  </button>
+                </div>
               )}
             </div>
           ))}
@@ -324,6 +340,22 @@ function BoardsContent() {
           boards={boards}
           currentUser={currentUser}
           onClose={() => setShowInviteModal(false)}
+        />
+      )}
+
+      {showEditModal && editingBoard && (
+        <EditBoardModal
+          board={editingBoard}
+          workspaces={workspaces}
+          onClose={() => {
+            setShowEditModal(false);
+            setEditingBoard(null);
+          }}
+          onUpdated={(updatedBoard) => {
+            setBoards(prev => prev.map(b => b.id === updatedBoard.id ? updatedBoard : b));
+            setShowEditModal(false);
+            setEditingBoard(null);
+          }}
         />
       )}
     </div>
@@ -545,6 +577,165 @@ function CreateBoardModal({ workspaces, onClose, onCreated }) {
           onClose={() => setShowInviteModal(false)}
         />
       )}
+    </div>
+  );
+}
+
+// Edit Board Modal Component
+function EditBoardModal({ board, workspaces, onClose, onUpdated }) {
+  const [title, setTitle] = useState(board?.title || "");
+  const [workspaceId, setWorkspaceId] = useState(board?.workspace_id || null);
+  const [templateCategory, setTemplateCategory] = useState("personal");
+  const [selectedImage, setSelectedImage] = useState(board?.background_image || null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const canSubmit = title.trim().length > 0;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+
+    try {
+      // Get current user
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        console.error("Error getting user:", userError);
+        return;
+      }
+
+      // Update the board
+      const { data: boardData, error: boardError } = await supabase
+        .from("boards")
+        .update({
+          title: title.trim(),
+          workspace_id: workspaceId || null,
+          background_image: selectedImage || null,
+        })
+        .eq("id", board.id)
+        .select()
+        .single();
+
+      if (boardError) throw boardError;
+
+      onUpdated(boardData);
+    } catch (err) {
+      console.error("Error updating board:", err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-900">Edit Board</h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* Template Category */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Template category
+            </label>
+            <select
+              value={templateCategory}
+              onChange={(e) => setTemplateCategory(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {Object.entries(TEMPLATE_CATEGORIES).map(([key, category]) => (
+                <option key={key} value={key}>
+                  {category.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Background Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Background
+            </label>
+            <div className="grid grid-cols-4 gap-2">
+              {TEMPLATE_CATEGORIES[templateCategory].images.map((image, index) => (
+                <button
+                  key={index}
+                  onClick={() => setSelectedImage(image)}
+                  className={`aspect-video rounded-lg overflow-hidden border-2 ${
+                    selectedImage === image
+                      ? "border-blue-500"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  <img
+                    src={image}
+                    alt={`Background ${index + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Workspace Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Workspace name
+            </label>
+            <select
+              value={workspaceId || ""}
+              onChange={(e) => setWorkspaceId(e.target.value ? parseInt(e.target.value) : null)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id || "no-workspace"} value={workspace.id || ""}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Board Title */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Board title <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Enter board title"
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end space-x-3 p-6 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={!canSubmit || submitting}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 flex items-center space-x-2"
+          >
+            {submitting && (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            )}
+            <span>{submitting ? 'Saving...' : 'Save Board'}</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -845,6 +1036,10 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
   const [success, setSuccess] = useState("");
   const [adding, setAdding] = useState(false);
   const [isOwnerSearch, setIsOwnerSearch] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState([]);
+  const [workspaceInfo, setWorkspaceInfo] = useState(null);
+  const [showWorkspaceMembers, setShowWorkspaceMembers] = useState(false);
+  const [loadingWorkspaceMembers, setLoadingWorkspaceMembers] = useState(false);
 
   // Filter boards where current user is owner
   const ownedBoards = boards.filter(board => 
@@ -861,6 +1056,105 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
     };
     getCurrentUser();
   }, []);
+
+  // Load workspace information when board is selected
+  useEffect(() => {
+    if (selectedBoard) {
+      loadWorkspaceInfo(selectedBoard.workspace_id);
+    } else {
+      setWorkspaceInfo(null);
+      setWorkspaceMembers([]);
+    }
+  }, [selectedBoard]);
+
+  // Load workspace information and members
+  const loadWorkspaceInfo = async (workspaceId) => {
+    if (!workspaceId) {
+      setWorkspaceInfo(null);
+      setWorkspaceMembers([]);
+      return;
+    }
+    
+    try {
+      // Get workspace info
+      const { data: workspaceData, error: workspaceError } = await supabase
+        .from("workspaces")
+        .select("id, name, user_id")
+        .eq("id", workspaceId)
+        .single();
+
+      if (workspaceError) {
+        console.error("Error fetching workspace:", workspaceError);
+        return;
+      }
+
+      setWorkspaceInfo(workspaceData);
+      loadWorkspaceMembers(workspaceId);
+    } catch (error) {
+      console.error("Error loading workspace info:", error);
+    }
+  };
+
+  // Load workspace members
+  const loadWorkspaceMembers = async (workspaceId) => {
+    if (!workspaceId) return;
+    
+    setLoadingWorkspaceMembers(true);
+    try {
+      // Get workspace owner
+      const { data: workspaceData, error: workspaceError } = await supabase
+        .from("workspaces")
+        .select("user_id")
+        .eq("id", workspaceId)
+        .single();
+
+      if (workspaceError) throw workspaceError;
+
+      // Get workspace owner profile
+      const { data: ownerProfile, error: ownerError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .eq("id", workspaceData.user_id)
+        .single();
+
+      if (ownerError) throw ownerError;
+
+      // Get accepted workspace members (excluding owner)
+      const { data: invitations, error: invitationError } = await supabase
+        .from("workspace_invitations")
+        .select("invited_user_id")
+        .eq("workspace_id", workspaceId)
+        .eq("status", "accepted");
+
+      if (invitationError) {
+        console.error("Error loading workspace invitations:", invitationError);
+        setWorkspaceMembers([]);
+        return;
+      }
+
+      if (invitations && invitations.length > 0) {
+        const userIds = invitations.map(inv => inv.invited_user_id);
+        const { data: memberProfiles, error: membersError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .in("id", userIds);
+
+        if (membersError) {
+          console.error("Error loading member profiles:", membersError);
+          setWorkspaceMembers([]);
+        } else {
+          setWorkspaceMembers(memberProfiles || []);
+        }
+      } else {
+        setWorkspaceMembers([]);
+      }
+    } catch (error) {
+      console.error("Error loading workspace members:", error);
+      setWorkspaceMembers([]);
+    } finally {
+      setLoadingWorkspaceMembers(false);
+    }
+  };
 
   // Search for users based on email or username
   const searchUsers = async (query) => {
@@ -896,74 +1190,86 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
 
       setIsOwnerSearch(false);
 
-      // Search for other users - try multiple approaches
-      let profiles = [];
-      let profilesError = null;
+      // If board is not in a workspace, allow searching all users
+      if (!workspaceInfo) {
+        // Search for other users - try multiple approaches
+        let profiles = [];
+        let profilesError = null;
 
-      // First, try to search with both username and email
-      const { data: searchResults, error: searchError } = await supabase
-        .from("profiles")
-        .select("id, username, email")
-        .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
-        .limit(10);
-
-      if (searchError) {
-        // If email column doesn't exist, fallback to username only
-        if (searchError.code === '42703') {
-          const { data: usernameResults, error: usernameError } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .ilike("username", `%${query}%`)
-            .limit(10);
-
-          if (!usernameError && usernameResults) {
-            profiles = usernameResults.map(p => ({ ...p, email: null }));
-          }
-        } else {
-          // For other errors, try username search only
-          const { data: usernameResults, error: usernameError } = await supabase
-            .from("profiles")
-            .select("id, username")
-            .ilike("username", `%${query}%`)
-            .limit(10);
-
-          if (!usernameError && usernameResults) {
-            profiles = usernameResults.map(p => ({ ...p, email: null }));
-          }
-        }
-      } else if (searchResults) {
-        profiles = searchResults;
-      }
-
-      // If no results with the OR query, try separate searches
-      if (profiles.length === 0) {
-        // Try username search
-        const { data: usernameResults, error: usernameError } = await supabase
+        // First, try to search with both username and email
+        const { data: searchResults, error: searchError } = await supabase
           .from("profiles")
           .select("id, username, email")
-          .ilike("username", `%${query}%`)
-          .limit(5);
+          .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
+          .limit(10);
 
-        if (!usernameError && usernameResults) {
-          profiles = [...profiles, ...usernameResults];
+        if (searchError) {
+          // If email column doesn't exist, fallback to username only
+          if (searchError.code === '42703') {
+            const { data: usernameResults, error: usernameError } = await supabase
+              .from("profiles")
+              .select("id, username")
+              .ilike("username", `%${query}%`)
+              .limit(10);
+
+            if (!usernameError && usernameResults) {
+              profiles = usernameResults.map(p => ({ ...p, email: null }));
+            }
+          } else {
+            // For other errors, try username search only
+            const { data: usernameResults, error: usernameError } = await supabase
+              .from("profiles")
+              .select("id, username")
+              .ilike("username", `%${query}%`)
+              .limit(10);
+
+            if (!usernameError && usernameResults) {
+              profiles = usernameResults.map(p => ({ ...p, email: null }));
+            }
+          }
+        } else if (searchResults) {
+          profiles = searchResults;
         }
 
-        // Try email search (if email column exists)
-        const { data: emailResults, error: emailError } = await supabase
-          .from("profiles")
-          .select("id, username, email")
-          .ilike("email", `%${query}%`)
-          .limit(5);
+        // If no results with the OR query, try separate searches
+        if (profiles.length === 0) {
+          // Try username search
+          const { data: usernameResults, error: usernameError } = await supabase
+            .from("profiles")
+            .select("id, username, email")
+            .ilike("username", `%${query}%`)
+            .limit(5);
 
-        if (!emailError && emailResults) {
-          // Merge results, avoiding duplicates
-          const existingIds = profiles.map(p => p.id);
-          const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
-          profiles = [...profiles, ...newEmailResults];
+          if (!usernameError && usernameResults) {
+            profiles = [...profiles, ...usernameResults];
+          }
+
+          // Try email search (if email column exists)
+          const { data: emailResults, error: emailError } = await supabase
+            .from("profiles")
+            .select("id, username, email")
+            .ilike("email", `%${query}%`)
+            .limit(5);
+
+          if (!emailError && emailResults) {
+            // Merge results, avoiding duplicates
+            const existingIds = profiles.map(p => p.id);
+            const newEmailResults = emailResults.filter(p => !existingIds.includes(p.id));
+            profiles = [...profiles, ...newEmailResults];
+          }
         }
+
+        setSearchResults(profiles);
+        return;
       }
 
-      setSearchResults(profiles);
+      // If board is in a workspace, only search within workspace members
+      const filteredMembers = workspaceMembers.filter(member => 
+        member.username?.toLowerCase().includes(query.toLowerCase()) ||
+        member.email?.toLowerCase().includes(query.toLowerCase())
+      );
+
+      setSearchResults(filteredMembers);
     } catch (error) {
       console.error("Error searching users:", error);
       setSearchResults([]);
@@ -1066,6 +1372,19 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
         const invitationNames = hasPendingInvitations.map(member => member.username).join(', ');
         setError(`${invitationNames} ${hasPendingInvitations.length === 1 ? 'has' : 'have'} pending invitation${hasPendingInvitations.length === 1 ? '' : 's'} for this board.`);
         return;
+      }
+
+      // Check workspace membership if board is in a workspace
+      if (workspaceInfo) {
+        const nonWorkspaceMembers = selectedMembers.filter(selectedMember => 
+          !workspaceMembers.some(workspaceMember => workspaceMember.id === selectedMember.id)
+        );
+
+        if (nonWorkspaceMembers.length > 0) {
+          const memberNames = nonWorkspaceMembers.map(member => member.username).join(', ');
+          setError(`${memberNames} ${nonWorkspaceMembers.length === 1 ? 'is' : 'are'} not members of the workspace "${workspaceInfo.name}". Only workspace members can be invited to boards.`);
+          return;
+        }
       }
 
       // For users who previously declined invitations, delete the old invitation record
@@ -1195,6 +1514,70 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
             )}
           </div>
 
+          {/* Workspace Info */}
+          {workspaceInfo && selectedBoard && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  🏢
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900">Workspace Board</div>
+                  <div className="text-sm text-blue-700">This board belongs to "{workspaceInfo.name}" workspace</div>
+                  <div className="text-xs text-blue-600 mt-1">Only workspace members can be invited to this board</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Workspace Members Dropdown Toggle */}
+          {workspaceInfo && workspaceMembers.length > 0 && selectedBoard && (
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowWorkspaceMembers(!showWorkspaceMembers)}
+                className="flex items-center justify-between w-full p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                <span className="text-sm font-medium text-gray-700">
+                  View Workspace Members ({workspaceMembers.length})
+                </span>
+                {showWorkspaceMembers ? (
+                  <ChevronUp className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                )}
+              </button>
+              
+              {showWorkspaceMembers && (
+                <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
+                  {workspaceMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center space-x-3 p-3 border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                        {member.username?.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">
+                          {member.username}
+                        </div>
+                        {member.email && (
+                          <div className="text-sm text-gray-500">{member.email}</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleUserSelect(member)}
+                        className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors duration-200"
+                      >
+                        Invite
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Search Input */}
           <div className="relative">
             <input
@@ -1206,7 +1589,7 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
               }}
               disabled={!selectedBoard}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder={selectedBoard ? "Search by email or username..." : "Select a board first..."}
+              placeholder={selectedBoard ? (workspaceInfo ? "Search workspace members..." : "Search by email or username...") : "Select a board first..."}
             />
             {loading && (
               <div className="absolute right-3 top-3">
@@ -1298,11 +1681,15 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
             <div className={`p-3 rounded-lg ${
               error.includes('already a member') 
                 ? 'bg-orange-50 border border-orange-200' 
+                : error.includes('not members of the workspace')
+                ? 'bg-yellow-50 border border-yellow-200'
                 : 'bg-red-50 border border-red-200'
             }`}>
               <div className={`text-sm ${
                 error.includes('already a member') 
                   ? 'text-orange-600' 
+                  : error.includes('not members of the workspace')
+                  ? 'text-yellow-600'
                   : 'text-red-600'
               }`}>
                 {error.includes('already a member') && (
@@ -1311,6 +1698,14 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
                       <span className="text-white text-xs">!</span>
                     </div>
                     <span className="font-medium">Member Already Exists</span>
+                  </div>
+                )}
+                {error.includes('not members of the workspace') && (
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <span className="font-medium">Workspace Membership Required</span>
                   </div>
                 )}
                 {error}

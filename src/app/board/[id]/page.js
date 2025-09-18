@@ -1600,8 +1600,12 @@ function AddMembersModal({ boardId, onClose }) {
   const [success, setSuccess] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
   const [isOwnerSearch, setIsOwnerSearch] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState([]);
+  const [workspaceInfo, setWorkspaceInfo] = useState(null);
+  const [showWorkspaceMembers, setShowWorkspaceMembers] = useState(false);
+  const [loadingWorkspaceMembers, setLoadingWorkspaceMembers] = useState(false);
 
-  // Get current user
+  // Get current user and load workspace info
   useEffect(() => {
     const getCurrentUser = async () => {
       const { data: { user }, error } = await supabase.auth.getUser();
@@ -1610,7 +1614,110 @@ function AddMembersModal({ boardId, onClose }) {
       }
     };
     getCurrentUser();
-  }, []);
+    loadWorkspaceInfo();
+  }, [boardId]);
+
+  // Load workspace information and members
+  const loadWorkspaceInfo = async () => {
+    if (!boardId) return;
+    
+    try {
+      // Get board info to find workspace_id
+      const { data: boardData, error: boardError } = await supabase
+        .from("boards")
+        .select("workspace_id")
+        .eq("id", boardId)
+        .single();
+
+      if (boardError) {
+        console.error("Error fetching board workspace:", boardError);
+        return;
+      }
+
+      if (!boardData.workspace_id) {
+        console.log("Board is not associated with any workspace");
+        return;
+      }
+
+      // Get workspace info
+      const { data: workspaceData, error: workspaceError } = await supabase
+        .from("workspaces")
+        .select("id, name, user_id")
+        .eq("id", boardData.workspace_id)
+        .single();
+
+      if (workspaceError) {
+        console.error("Error fetching workspace:", workspaceError);
+        return;
+      }
+
+      setWorkspaceInfo(workspaceData);
+      loadWorkspaceMembers(boardData.workspace_id);
+    } catch (error) {
+      console.error("Error loading workspace info:", error);
+    }
+  };
+
+  // Load workspace members
+  const loadWorkspaceMembers = async (workspaceId) => {
+    if (!workspaceId) return;
+    
+    setLoadingWorkspaceMembers(true);
+    try {
+      // Get workspace owner
+      const { data: workspaceData, error: workspaceError } = await supabase
+        .from("workspaces")
+        .select("user_id")
+        .eq("id", workspaceId)
+        .single();
+
+      if (workspaceError) throw workspaceError;
+
+      // Get workspace owner profile
+      const { data: ownerProfile, error: ownerError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .eq("id", workspaceData.user_id)
+        .single();
+
+      if (ownerError) throw ownerError;
+
+      // Get accepted workspace members (excluding owner)
+      const { data: invitations, error: invitationError } = await supabase
+        .from("workspace_invitations")
+        .select("invited_user_id")
+        .eq("workspace_id", workspaceId)
+        .eq("status", "accepted");
+
+      if (invitationError) {
+        console.error("Error loading workspace invitations:", invitationError);
+        setWorkspaceMembers([]);
+        return;
+      }
+
+      if (invitations && invitations.length > 0) {
+        const userIds = invitations.map(inv => inv.invited_user_id);
+        const { data: memberProfiles, error: membersError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .in("id", userIds);
+
+        if (membersError) {
+          console.error("Error loading member profiles:", membersError);
+          setWorkspaceMembers([]);
+        } else {
+          setWorkspaceMembers(memberProfiles || []);
+        }
+      } else {
+        setWorkspaceMembers([]);
+      }
+    } catch (error) {
+      console.error("Error loading workspace members:", error);
+      setWorkspaceMembers([]);
+    } finally {
+      setLoadingWorkspaceMembers(false);
+    }
+  };
 
 
   // Search for users based on email or username
@@ -1647,6 +1754,8 @@ function AddMembersModal({ boardId, onClose }) {
 
       setIsOwnerSearch(false);
 
+      // If board is not in a workspace, allow searching all users
+      if (!workspaceInfo) {
       // Search for other users - try multiple approaches
       let profiles = [];
       let profilesError = null;
@@ -1716,6 +1825,19 @@ function AddMembersModal({ boardId, onClose }) {
       }
 
       setSearchResults(profiles);
+        return;
+      }
+
+      // If board is in a workspace, only search within workspace members
+      const workspaceMemberIds = workspaceMembers.map(member => member.id);
+      
+      // Search within workspace members
+      const filteredMembers = workspaceMembers.filter(member => 
+        member.username?.toLowerCase().includes(query.toLowerCase()) ||
+        member.email?.toLowerCase().includes(query.toLowerCase())
+      );
+
+      setSearchResults(filteredMembers);
     } catch (error) {
       console.error("Error searching users:", error);
       setSearchResults([]);
@@ -1841,6 +1963,19 @@ function AddMembersModal({ boardId, onClose }) {
         }
       }
 
+      // Check workspace membership if board is in a workspace
+      if (workspaceInfo) {
+        const nonWorkspaceMembers = selectedMembers.filter(selectedMember => 
+          !workspaceMembers.some(workspaceMember => workspaceMember.id === selectedMember.id)
+        );
+
+        if (nonWorkspaceMembers.length > 0) {
+          const memberNames = nonWorkspaceMembers.map(member => member.username).join(', ');
+          setError(`${memberNames} ${nonWorkspaceMembers.length === 1 ? 'is' : 'are'} not members of the workspace "${workspaceInfo.name}". Only workspace members can be invited to boards.`);
+          return;
+        }
+      }
+
       // Filter out users who are already members or have pending invitations
       // Allow re-inviting users who previously declined invitations (we just cleaned up their old records)
       const newInvitations = selectedMembers.filter(selectedMember => {
@@ -1940,6 +2075,70 @@ function AddMembersModal({ boardId, onClose }) {
         </div>
 
         <div className="p-6 space-y-4">
+          {/* Workspace Info */}
+          {workspaceInfo && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  🏢
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900">Workspace Board</div>
+                  <div className="text-sm text-blue-700">This board belongs to "{workspaceInfo.name}" workspace</div>
+                  <div className="text-xs text-blue-600 mt-1">Only workspace members can be invited to this board</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Workspace Members Dropdown Toggle */}
+          {workspaceInfo && workspaceMembers.length > 0 && (
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowWorkspaceMembers(!showWorkspaceMembers)}
+                className="flex items-center justify-between w-full p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+              >
+                <span className="text-sm font-medium text-gray-700">
+                  View Workspace Members ({workspaceMembers.length})
+                </span>
+                {showWorkspaceMembers ? (
+                  <ChevronUp className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                )}
+              </button>
+              
+              {showWorkspaceMembers && (
+                <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
+                  {workspaceMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center space-x-3 p-3 border-b border-gray-100 last:border-b-0"
+                    >
+                      <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                        {member.username?.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">
+                          {member.username}
+                        </div>
+                        {member.email && (
+                          <div className="text-sm text-gray-500">{member.email}</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleUserSelect(member)}
+                        className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors duration-200"
+                      >
+                        Invite
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Search Input */}
           <div className="relative">
             <input
@@ -1950,7 +2149,7 @@ function AddMembersModal({ boardId, onClose }) {
                 setError(""); // Clear errors when user starts typing
               }}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Search by email or username..."
+              placeholder={workspaceInfo ? "Search workspace members..." : "Search by email or username..."}
             />
             {loading && (
               <div className="absolute right-3 top-3">
@@ -2042,11 +2241,15 @@ function AddMembersModal({ boardId, onClose }) {
             <div className={`p-3 rounded-lg ${
               error.includes('already a member') 
                 ? 'bg-orange-50 border border-orange-200' 
+                : error.includes('not members of the workspace')
+                ? 'bg-yellow-50 border border-yellow-200'
                 : 'bg-red-50 border border-red-200'
             }`}>
               <div className={`text-sm ${
                 error.includes('already a member') 
                   ? 'text-orange-600' 
+                  : error.includes('not members of the workspace')
+                  ? 'text-yellow-600'
                   : 'text-red-600'
               }`}>
                 {error.includes('already a member') && (
@@ -2055,6 +2258,14 @@ function AddMembersModal({ boardId, onClose }) {
                       <span className="text-white text-xs">!</span>
                     </div>
                     <span className="font-medium">Member Already Exists</span>
+                  </div>
+                )}
+                {error.includes('not members of the workspace') && (
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <span className="font-medium">Workspace Membership Required</span>
                   </div>
                 )}
                 {error}
