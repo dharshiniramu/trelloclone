@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
-import { Plus, FolderOpen, Layout, Trash, X, Star, Users, Edit } from "lucide-react";
+import { Plus, FolderOpen, Layout, Trash, X, Star, Users, Edit, ChevronUp, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 
 // ✅ Categories with 4 sample images each
@@ -1059,11 +1059,26 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
   const [workspaceInfo, setWorkspaceInfo] = useState(null);
   const [showWorkspaceMembers, setShowWorkspaceMembers] = useState(false);
   const [loadingWorkspaceMembers, setLoadingWorkspaceMembers] = useState(false);
+  const [existingBoardMembers, setExistingBoardMembers] = useState([]);
+  const [availableMembers, setAvailableMembers] = useState([]);
 
-  // Filter boards where current user is owner
-  const ownedBoards = boards.filter(board => 
-    currentUser && board.user_id === currentUser.id
-  );
+  // Filter boards where current user is owner or admin
+  const ownedBoards = boards.filter(board => {
+    if (!currentUser) return false;
+    
+    // Check if user is the board owner
+    if (board.user_id === currentUser.id) return true;
+    
+    // Check if user is an admin member
+    if (board.members && Array.isArray(board.members)) {
+      return board.members.some(member => 
+        member.user_id === currentUser.id && 
+        (member.role === 'owner' || member.role === 'admin')
+      );
+    }
+    
+    return false;
+  });
 
   // Get current user
   useEffect(() => {
@@ -1076,19 +1091,24 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
     getCurrentUser();
   }, []);
 
-  // Load workspace information when board is selected
+  // Load workspace information and board members when board is selected
   useEffect(() => {
     if (selectedBoard) {
       loadWorkspaceInfo(selectedBoard.workspace_id);
+      loadExistingBoardMembers(selectedBoard.id);
     } else {
       setWorkspaceInfo(null);
       setWorkspaceMembers([]);
+      setExistingBoardMembers([]);
+      setAvailableMembers([]);
     }
   }, [selectedBoard]);
 
   // Load workspace information and members
   const loadWorkspaceInfo = async (workspaceId) => {
+    console.log("🔍 Loading workspace info for workspace ID:", workspaceId);
     if (!workspaceId) {
+      console.log("❌ No workspace ID provided");
       setWorkspaceInfo(null);
       setWorkspaceMembers([]);
       return;
@@ -1107,6 +1127,7 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
         return;
       }
 
+      console.log("✅ Workspace info loaded:", workspaceData);
       setWorkspaceInfo(workspaceData);
       loadWorkspaceMembers(workspaceId);
     } catch (error) {
@@ -1116,6 +1137,7 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
 
   // Load workspace members
   const loadWorkspaceMembers = async (workspaceId) => {
+    console.log("👥 Loading workspace members for workspace ID:", workspaceId);
     if (!workspaceId) return;
     
     setLoadingWorkspaceMembers(true);
@@ -1138,6 +1160,10 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
 
       if (ownerError) throw ownerError;
 
+      console.log("👑 Workspace owner:", ownerProfile);
+      // Start with workspace owner
+      let allWorkspaceMembers = [ownerProfile];
+
       // Get accepted workspace members (excluding owner)
       const { data: invitations, error: invitationError } = await supabase
         .from("workspace_invitations")
@@ -1147,7 +1173,11 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
 
       if (invitationError) {
         console.error("Error loading workspace invitations:", invitationError);
-        setWorkspaceMembers([]);
+        // Still set workspace members with just the owner
+        setWorkspaceMembers(allWorkspaceMembers);
+        if (selectedBoard) {
+          updateAvailableMembers(allWorkspaceMembers, existingBoardMembers, selectedBoard.user_id);
+        }
         return;
       }
 
@@ -1160,12 +1190,24 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
 
         if (membersError) {
           console.error("Error loading member profiles:", membersError);
-          setWorkspaceMembers([]);
+          // Still set workspace members with just the owner
+          setWorkspaceMembers(allWorkspaceMembers);
         } else {
-          setWorkspaceMembers(memberProfiles || []);
+          // Combine owner and invited members
+          allWorkspaceMembers = [...allWorkspaceMembers, ...(memberProfiles || [])];
+          console.log("✅ All workspace members loaded:", allWorkspaceMembers);
+          setWorkspaceMembers(allWorkspaceMembers);
+          // Update available members when workspace members are loaded
+          if (selectedBoard) {
+            updateAvailableMembers(allWorkspaceMembers, existingBoardMembers, selectedBoard.user_id);
+          }
         }
       } else {
-        setWorkspaceMembers([]);
+        // No invited members, just the owner
+        setWorkspaceMembers(allWorkspaceMembers);
+        if (selectedBoard) {
+          updateAvailableMembers(allWorkspaceMembers, existingBoardMembers, selectedBoard.user_id);
+        }
       }
     } catch (error) {
       console.error("Error loading workspace members:", error);
@@ -1173,6 +1215,86 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
     } finally {
       setLoadingWorkspaceMembers(false);
     }
+  };
+
+  // Load existing board members
+  const loadExistingBoardMembers = async (boardId) => {
+    if (!boardId) {
+      setExistingBoardMembers([]);
+      setAvailableMembers([]);
+      return;
+    }
+
+    try {
+      // Get the board data to access members array
+      const { data: boardData, error: boardError } = await supabase
+        .from("boards")
+        .select("members, user_id")
+        .eq("id", boardId)
+        .single();
+
+      if (boardError) {
+        console.error("Error loading board data:", boardError);
+        setExistingBoardMembers([]);
+        setAvailableMembers([]);
+        return;
+      }
+
+      const members = boardData.members || [];
+      const memberIds = members.map(member => member.user_id);
+      
+      // Add the board owner to the existing members list
+      const allExistingMemberIds = [...memberIds, boardData.user_id];
+
+      // Get profiles for existing members
+      let memberProfiles = [];
+      if (allExistingMemberIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .in("id", allExistingMemberIds);
+
+        if (profilesError) {
+          console.error("Error loading member profiles:", profilesError);
+          setExistingBoardMembers([]);
+        } else {
+          memberProfiles = profiles || [];
+          setExistingBoardMembers(memberProfiles);
+        }
+      } else {
+        setExistingBoardMembers([]);
+      }
+
+      // Update available members by filtering out existing members
+      updateAvailableMembers(workspaceMembers, memberProfiles, boardData.user_id);
+    } catch (error) {
+      console.error("Error loading existing board members:", error);
+      setExistingBoardMembers([]);
+      setAvailableMembers([]);
+    }
+  };
+
+  // Update available members by filtering out existing board members
+  const updateAvailableMembers = (workspaceMembersList, existingMembers, boardOwnerId) => {
+    console.log("🔄 Updating available members:");
+    console.log("  - Workspace members:", workspaceMembersList);
+    console.log("  - Existing board members:", existingMembers);
+    console.log("  - Board owner ID:", boardOwnerId);
+    
+    if (!workspaceInfo) {
+      // If not in a workspace, we'll handle this in the search function
+      console.log("❌ No workspace info, clearing available members");
+      setAvailableMembers([]);
+      return;
+    }
+
+    // Filter out only those who are already on the board (not workspace members)
+    const available = workspaceMembersList.filter(member => 
+      !existingMembers.some(existing => existing.id === member.id)
+    );
+
+    console.log("✅ Available members after filtering:", available);
+    setAvailableMembers(available);
   };
 
   // Search for users based on email or username
@@ -1282,7 +1404,7 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
         return;
       }
 
-      // If board is in a workspace, only search within workspace members
+      // If board is in a workspace, search within all workspace members
       const filteredMembers = workspaceMembers.filter(member => 
         member.username?.toLowerCase().includes(query.toLowerCase()) ||
         member.email?.toLowerCase().includes(query.toLowerCase())
@@ -1334,9 +1456,14 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
         return;
       }
 
-      // Verify user is the owner of the selected board
-      if (selectedBoard.user_id !== user.id) {
-        setError("You can only invite members to boards you own.");
+      // Verify user is the owner or admin of the selected board
+      const isOwner = selectedBoard.user_id === user.id;
+      const isAdmin = selectedBoard.members && selectedBoard.members.some(member => 
+        member.user_id === user.id && member.role === 'admin'
+      );
+      
+      if (!isOwner && !isAdmin) {
+        setError("You can only invite members to boards you own or administer.");
         return;
       }
 
@@ -1528,7 +1655,7 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
             </select>
             {ownedBoards.length === 0 && (
               <p className="text-sm text-gray-500 mt-1">
-                You don't own any boards yet. Create a board first to invite members.
+                You don't have permission to invite members to any boards yet. Create a board or become an admin first.
               </p>
             )}
           </div>
@@ -1545,6 +1672,41 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
                   <div className="text-sm text-blue-700">This board belongs to "{workspaceInfo.name}" workspace</div>
                   <div className="text-xs text-blue-600 mt-1">Only workspace members can be invited to this board</div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Existing Board Members */}
+          {existingBoardMembers.length > 0 && selectedBoard && (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex items-center space-x-2 mb-2">
+                <div className="w-6 h-6 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                  👥
+                </div>
+                <div className="font-medium text-gray-900">Current Board Members</div>
+              </div>
+              <div className="space-y-1">
+                {existingBoardMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center space-x-2 text-sm"
+                  >
+                    <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                      {member.username?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">{member.username}</div>
+                      {member.email && (
+                        <div className="text-xs text-gray-500">{member.email}</div>
+                      )}
+                    </div>
+                    {member.id === selectedBoard.user_id && (
+                      <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                        Owner
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1568,32 +1730,77 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
               
               {showWorkspaceMembers && (
                 <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
-                  {workspaceMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center space-x-3 p-3 border-b border-gray-100 last:border-b-0"
-                    >
-                      <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
-                        {member.username?.charAt(0)?.toUpperCase() || '?'}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900">
-                          {member.username}
+                  {workspaceMembers.map((member) => {
+                    const isAlreadyOnBoard = existingBoardMembers.some(existing => existing.id === member.id);
+                    const isBoardOwner = member.id === selectedBoard.user_id;
+                    const canInvite = !isAlreadyOnBoard && !isBoardOwner;
+                    
+                    return (
+                      <div
+                        key={member.id}
+                        className={`flex items-center space-x-3 p-3 border-b border-gray-100 last:border-b-0 ${
+                          !canInvite ? 'opacity-50' : ''
+                        }`}
+                      >
+                        <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                          {member.username?.charAt(0)?.toUpperCase() || '?'}
                         </div>
-                        {member.email && (
-                          <div className="text-sm text-gray-500">{member.email}</div>
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-900">
+                            {member.username}
+                          </div>
+                          {member.email && (
+                            <div className="text-sm text-gray-500">{member.email}</div>
+                          )}
+                          {isBoardOwner && (
+                            <div className="text-xs text-blue-600 font-medium">Board Owner</div>
+                          )}
+                          {isAlreadyOnBoard && !isBoardOwner && (
+                            <div className="text-xs text-orange-600 font-medium">Already on Board</div>
+                          )}
+                        </div>
+                        {canInvite ? (
+                          <button
+                            onClick={() => handleUserSelect(member)}
+                            className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors duration-200"
+                          >
+                            Invite
+                          </button>
+                        ) : (
+                          <span className="px-3 py-1 text-xs bg-gray-100 text-gray-500 rounded-full">
+                            {isBoardOwner ? 'Owner' : 'On Board'}
+                          </span>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleUserSelect(member)}
-                        className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors duration-200"
-                      >
-                        Invite
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* No Available Members Message */}
+          {workspaceInfo && availableMembers.length === 0 && selectedBoard && (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <div className="w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                  !
+                </div>
+                <div>
+                  <div className="font-medium text-yellow-900">
+                    {workspaceMembers.length === 0 
+                      ? "No workspace members to invite" 
+                      : "All workspace members are already on this board"
+                    }
+                  </div>
+                  <div className="text-sm text-yellow-700">
+                    {workspaceMembers.length === 0 
+                      ? "Add members to the workspace first" 
+                      : "There are no available members to invite"
+                    }
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1608,7 +1815,7 @@ function InviteMembersToBoardModal({ boards, currentUser, onClose }) {
               }}
               disabled={!selectedBoard}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder={selectedBoard ? (workspaceInfo ? "Search workspace members..." : "Search by email or username...") : "Select a board first..."}
+              placeholder={selectedBoard ? (workspaceInfo ? "Search available members..." : "Search by email or username...") : "Select a board first..."}
             />
             {loading && (
               <div className="absolute right-3 top-3">
