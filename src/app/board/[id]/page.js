@@ -2361,21 +2361,22 @@ function AddMembersModal({ boardId, onClose }) {
         return;
       }
 
+      // Combine owner and accepted members
+      const allUserIds = [workspaceData.user_id];
       if (invitations && invitations.length > 0) {
-        const userIds = invitations.map(inv => inv.invited_user_id);
-        const { data: memberProfiles, error: membersError } = await supabase
-          .from("profiles")
-          .select("id, username, email")
-          .in("id", userIds);
+        allUserIds.push(...invitations.map(inv => inv.invited_user_id));
+      }
 
-        if (membersError) {
-          console.error("Error loading member profiles:", membersError);
-          setWorkspaceMembers([]);
-        } else {
-          setWorkspaceMembers(memberProfiles || []);
-        }
-      } else {
+      const { data: memberProfiles, error: membersError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .in("id", allUserIds);
+
+      if (membersError) {
+        console.error("Error loading member profiles:", membersError);
         setWorkspaceMembers([]);
+      } else {
+        setWorkspaceMembers(memberProfiles || []);
       }
     } catch (error) {
       console.error("Error loading workspace members:", error);
@@ -2714,10 +2715,10 @@ function AddMembersModal({ boardId, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Invite Members</h2>
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-xs max-h-[75vh] flex flex-col">
+        <div className="flex items-center justify-between p-2 border-b border-gray-200 flex-shrink-0">
+          <h2 className="text-sm font-semibold text-gray-900">Invite Members</h2>
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
@@ -2726,17 +2727,17 @@ function AddMembersModal({ boardId, onClose }) {
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-2 space-y-1 overflow-y-auto flex-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
           {/* Workspace Info */}
           {workspaceInfo && (
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="p-1 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
                   🏢
                 </div>
                 <div>
-                  <div className="font-medium text-blue-900">Workspace Board</div>
-                  <div className="text-sm text-blue-700">This board belongs to "{workspaceInfo.name}" workspace</div>
+                  <div className="font-medium text-blue-900 text-sm">Workspace Board</div>
+                  <div className="text-xs text-blue-700">This board belongs to "{workspaceInfo.name}" workspace</div>
                   <div className="text-xs text-blue-600 mt-1">Only workspace members can be invited to this board</div>
                 </div>
               </div>
@@ -2748,9 +2749,9 @@ function AddMembersModal({ boardId, onClose }) {
             <div className="space-y-2">
               <button
                 onClick={() => setShowWorkspaceMembers(!showWorkspaceMembers)}
-                className="flex items-center justify-between w-full p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+                className="flex items-center justify-between w-full p-1 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors duration-200 text-sm"
               >
-                <span className="text-sm font-medium text-gray-700">
+                <span className="text-xs font-medium text-gray-700">
                   View Workspace Members ({workspaceMembers.length})
                 </span>
                 {showWorkspaceMembers ? (
@@ -2761,26 +2762,26 @@ function AddMembersModal({ boardId, onClose }) {
               </button>
               
               {showWorkspaceMembers && (
-                <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
+                <div className="border border-gray-200 rounded-lg max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
                   {workspaceMembers.map((member) => (
                     <div
                       key={member.id}
-                      className="flex items-center space-x-3 p-3 border-b border-gray-100 last:border-b-0"
+                      className="flex items-center space-x-2 p-1 border-b border-gray-100 last:border-b-0"
                     >
-                      <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      <div className="w-6 h-6 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
                         {member.username?.charAt(0)?.toUpperCase() || '?'}
                       </div>
                       <div className="flex-1">
-                        <div className="font-medium text-gray-900">
+                        <div className="font-medium text-gray-900 text-sm">
                           {member.username}
                         </div>
                         {member.email && (
-                          <div className="text-sm text-gray-500">{member.email}</div>
+                          <div className="text-xs text-gray-500">{member.email}</div>
                         )}
                       </div>
                       <button
                         onClick={() => handleUserSelect(member)}
-                        className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors duration-200"
+                        className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors duration-200"
                       >
                         Invite
                       </button>
@@ -2800,7 +2801,7 @@ function AddMembersModal({ boardId, onClose }) {
                 setSearchQuery(e.target.value);
                 setError(""); // Clear errors when user starts typing
               }}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
               placeholder={workspaceInfo ? "Search workspace members..." : "Search by email or username..."}
             />
             {loading && (
@@ -2812,7 +2813,7 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* Owner Search Message */}
           {isOwnerSearch && (
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
                   👑
@@ -2827,23 +2828,23 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* Search Results Dropdown */}
           {searchResults.length > 0 && !isOwnerSearch && (
-            <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
+            <div className="border border-gray-200 rounded-lg max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
               {searchResults.map((user) => (
                 <button
                   key={user.id}
                   onClick={() => handleUserSelect(user)}
-                  className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                  className="w-full p-1 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
                       {user.username?.charAt(0)?.toUpperCase() || '?'}
                     </div>
                     <div>
-                      <div className="font-medium text-gray-900">
+                      <div className="font-medium text-gray-900 text-sm">
                         {user.username}
                       </div>
                       {user.email && (
-                        <div className="text-sm text-gray-500">{user.email}</div>
+                        <div className="text-xs text-gray-500">{user.email}</div>
                       )}
                     </div>
                   </div>
@@ -2854,7 +2855,7 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* No Results Message */}
           {searchQuery && searchResults.length === 0 && !loading && !isOwnerSearch && (
-            <div className="p-4 text-center text-gray-500">
+            <div className="p-2 text-center text-gray-500">
               <div className="text-sm">No users found matching "{searchQuery}"</div>
               <div className="text-xs text-gray-400 mt-1">Try searching by username or email</div>
             </div>
@@ -2862,18 +2863,18 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* Selected Members */}
           {selectedMembers.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-gray-700">Selected Members:</h3>
-              <div className="space-y-2">
+            <div className="space-y-1">
+              <h3 className="text-xs font-medium text-gray-700">Selected:</h3>
+              <div className="space-y-1 max-h-16 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
                 {selectedMembers.map((member) => (
                   <div
                     key={member.id}
-                    className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
+                    className="flex items-center justify-between p-1 bg-gray-50 rounded-lg"
                   >
                     <div>
-                      <div className="font-medium text-gray-900">{member.username}</div>
+                      <div className="font-medium text-gray-900 text-sm">{member.username}</div>
                       {member.email && (
-                        <div className="text-sm text-gray-500">{member.email}</div>
+                        <div className="text-xs text-gray-500">{member.email}</div>
                       )}
                     </div>
                     <button
@@ -2890,7 +2891,7 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* Error Message */}
           {error && (
-            <div className={`p-3 rounded-lg ${
+            <div className={`p-2 rounded-lg ${
               error.includes('already a member') 
                 ? 'bg-orange-50 border border-orange-200' 
                 : error.includes('not members of the workspace')
@@ -2927,27 +2928,28 @@ function AddMembersModal({ boardId, onClose }) {
 
           {/* Success Message */}
           {success && (
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="p-2 bg-green-50 border border-green-200 rounded-lg">
               <div className="text-sm text-green-600">{success}</div>
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={addMembersToBoard}
-              disabled={selectedMembers.length === 0 || adding}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-            >
-              {adding ? "Sending..." : `Send ${selectedMembers.length} Invitation${selectedMembers.length !== 1 ? 's' : ''}`}
-            </button>
-          </div>
+        </div>
+
+        {/* Action Buttons - Fixed at bottom */}
+        <div className="flex gap-1 p-2 border-t border-gray-200 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="flex-1 px-2 py-1 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200 text-xs"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={addMembersToBoard}
+            disabled={selectedMembers.length === 0 || adding}
+            className="flex-1 px-2 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 text-xs"
+          >
+            {adding ? "Sending..." : `Send ${selectedMembers.length} Invitation${selectedMembers.length !== 1 ? 's' : ''}`}
+          </button>
         </div>
       </div>
     </div>
