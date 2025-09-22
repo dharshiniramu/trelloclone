@@ -167,6 +167,16 @@ function BoardsContent() {
     load();
   }, []);
 
+  // Refresh boards when user returns to the page (e.g., after accepting invitations)
+  useEffect(() => {
+    const handleFocus = () => {
+      load();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
+
   const addBoard = (board) => {
     setBoards((prev) => [...prev, board]);
   };
@@ -202,7 +212,6 @@ function BoardsContent() {
 
       if (!isOwner) {
         console.error("Only board owners can delete boards");
-        alert("Only board owners can delete boards");
         return;
       }
 
@@ -218,6 +227,16 @@ function BoardsContent() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex items-center justify-between mb-6 animate-fade-in">
         <h1 className="text-2xl font-bold text-gray-900">Boards</h1>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Refresh</span>
+        </button>
         <div className="flex items-center gap-3">
           <button 
             onClick={() => setShowInviteModal(true)}

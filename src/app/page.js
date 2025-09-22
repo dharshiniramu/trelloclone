@@ -101,192 +101,191 @@ function AuthenticatedHome({ username }) {
   const [processing, setProcessing] = useState(null);
   const [tableError, setTableError] = useState(false);
 
-  useEffect(() => {
-    const fetchInvitations = async () => {
-      setLoading(true);
-      try {
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user) return;
+  const fetchInvitations = async () => {
+    setLoading(true);
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) return;
 
-        // Fetch board invitations
-        const { data: boardInvitationsData, error: boardInvitationsError } = await supabase
-          .from("board_invitations")
-          .select(`
-            id,
-            board_id,
-            role,
-            created_at,
-            invited_by_user_id,
-            boards(title)
-          `)
-          .eq("invited_user_id", user.id)
-          .eq("status", "pending")
-          .order("created_at", { ascending: false });
+      // Fetch board invitations
+      const { data: boardInvitationsData, error: boardInvitationsError } = await supabase
+        .from("board_invitations")
+        .select(`
+          id,
+          board_id,
+          role,
+          created_at,
+          invited_by_user_id,
+          boards(title)
+        `)
+        .eq("invited_user_id", user.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
 
-        // Fetch workspace invitations
-        const { data: workspaceInvitationsData, error: workspaceInvitationsError } = await supabase
-          .from("workspace_invitations")
-          .select(`
-            id,
-            workspace_id,
-            role,
-            created_at,
-            invited_by_user_id
-          `)
-          .eq("invited_user_id", user.id)
-          .eq("status", "pending")
-          .order("created_at", { ascending: false });
+      // Fetch workspace invitations
+      const { data: workspaceInvitationsData, error: workspaceInvitationsError } = await supabase
+        .from("workspace_invitations")
+        .select(`
+          id,
+          workspace_id,
+          role,
+          created_at,
+          invited_by_user_id
+        `)
+        .eq("invited_user_id", user.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
 
-        // Handle board invitations
-        if (boardInvitationsError) {
-          console.error("Error fetching board invitations:", boardInvitationsError);
-          if (boardInvitationsError.code === '42P01') {
-            console.log("board_invitations table doesn't exist yet. Run the setup SQL script.");
-          }
-          setBoardInvitations([]);
-        } else {
-          console.log("Board invitations fetched:", boardInvitationsData?.length || 0);
-          
-          // Store all board invitations for now - we'll filter them after processing workspace invitations
-          setBoardInvitations(boardInvitationsData || []);
+      // Handle board invitations
+      if (boardInvitationsError) {
+        console.error("Error fetching board invitations:", boardInvitationsError);
+        if (boardInvitationsError.code === '42P01') {
+          console.log("board_invitations table doesn't exist yet. Run the setup SQL script.");
         }
+        setBoardInvitations([]);
+      } else {
+        console.log("Board invitations fetched:", boardInvitationsData?.length || 0);
+        
+        // Store all board invitations for now - we'll filter them after processing workspace invitations
+        setBoardInvitations(boardInvitationsData || []);
+      }
 
-        // Initialize workspace invitations with names
-        let workspaceInvitationsWithNames = workspaceInvitationsData || [];
+      // Initialize workspace invitations with names
+      let workspaceInvitationsWithNames = workspaceInvitationsData || [];
 
-        // Handle workspace invitations
-        if (workspaceInvitationsError) {
-          console.error("Error fetching workspace invitations:", workspaceInvitationsError);
-          if (workspaceInvitationsError.code === '42P01') {
-            console.log("workspace_invitations table doesn't exist yet. Run the setup SQL script.");
-          }
-          setWorkspaceInvitations([]);
-        } else {
-          console.log("Workspace invitations fetched:", workspaceInvitationsData?.length || 0);
-          // Fetch workspace names and board names for invitations
-          if (workspaceInvitationsWithNames.length > 0) {
-            try {
-              const workspaceIds = workspaceInvitationsWithNames
-                .map(inv => inv.workspace_id)
-                .filter(id => id !== null);
-              
-              // Extract board IDs from combined invitations
-              const boardIds = workspaceInvitationsWithNames
-                .map(inv => {
-                  if (inv.role && inv.role.includes('+board:')) {
-                    return inv.role.split('+board:')[1];
-                  }
-                  return null;
-                })
-                .filter(id => id !== null);
-              
-              console.log("Workspace IDs for names:", workspaceIds);
-              console.log("Board IDs for names:", boardIds);
-              
-              // Fetch workspace names
-              let workspaces = [];
-              if (workspaceIds.length > 0) {
-                const { data: workspacesData, error: workspacesError } = await supabase
-                  .from("workspaces")
-                  .select("id, name")
-                  .in("id", workspaceIds);
-
-                if (!workspacesError && workspacesData) {
-                  workspaces = workspacesData;
-                  console.log("Workspaces found:", workspaces);
-                } else {
-                  console.error("Error fetching workspaces:", workspacesError);
+      // Handle workspace invitations
+      if (workspaceInvitationsError) {
+        console.error("Error fetching workspace invitations:", workspaceInvitationsError);
+        if (workspaceInvitationsError.code === '42P01') {
+          console.log("workspace_invitations table doesn't exist yet. Run the setup SQL script.");
+        }
+        setWorkspaceInvitations([]);
+      } else {
+        console.log("Workspace invitations fetched:", workspaceInvitationsData?.length || 0);
+        // Fetch workspace names and board names for invitations
+        if (workspaceInvitationsWithNames.length > 0) {
+          try {
+            const workspaceIds = workspaceInvitationsWithNames
+              .map(inv => inv.workspace_id)
+              .filter(id => id !== null);
+            
+            // Extract board IDs from combined invitations
+            const boardIds = workspaceInvitationsWithNames
+              .map(inv => {
+                if (inv.role && inv.role.includes('+board:')) {
+                  return inv.role.split('+board:')[1];
                 }
+                return null;
+              })
+              .filter(id => id !== null);
+            
+            console.log("Workspace IDs for names:", workspaceIds);
+            console.log("Board IDs for names:", boardIds);
+            
+            // Fetch workspace names
+            let workspaces = [];
+            if (workspaceIds.length > 0) {
+              const { data: workspacesData, error: workspacesError } = await supabase
+                .from("workspaces")
+                .select("id, name")
+                .in("id", workspaceIds);
+
+              if (!workspacesError && workspacesData) {
+                workspaces = workspacesData;
+                console.log("Workspaces found:", workspaces);
+              } else {
+                console.error("Error fetching workspaces:", workspacesError);
               }
-
-              // Fetch board names for combined invitations
-              let boards = [];
-              if (boardIds.length > 0) {
-                const { data: boardsData, error: boardsError } = await supabase
-                  .from("boards")
-                  .select("id, title")
-                  .in("id", boardIds);
-
-                if (!boardsError && boardsData) {
-                  boards = boardsData;
-                  console.log("Boards found:", boards);
-                } else {
-                  console.error("Error fetching boards:", boardsError);
-                }
-              }
-
-              // Combine workspace and board data
-                  workspaceInvitationsWithNames = workspaceInvitationsWithNames.map(invitation => {
-                    const workspace = workspaces.find(w => w.id === invitation.workspace_id);
-                
-                // Check if this is a combined invitation by looking at the role field first
-                let isCombined = invitation.role && invitation.role.includes('+board:');
-                let boardId = null;
-                let board = null;
-                
-                if (isCombined) {
-                  // Extract board ID from role field
-                  boardId = invitation.role.split('+board:')[1];
-                  board = boardId ? boards.find(b => b.id === parseInt(boardId)) : null;
-                } else {
-                  // Check if there's a corresponding board invitation for the same user
-                  console.log("Checking for corresponding board invitation for user:", invitation.invited_user_id);
-                  console.log("Available board invitations:", boardInvitationsData?.map(bi => ({ 
-                    invited_user_id: bi.invited_user_id, 
-                    board_id: bi.board_id 
-                  })));
-                  
-                  const correspondingBoardInvitation = boardInvitationsData?.find(boardInv => 
-                    boardInv.invited_user_id === invitation.invited_user_id
-                  );
-                  
-                  console.log("Found corresponding board invitation:", correspondingBoardInvitation);
-                  
-                  if (correspondingBoardInvitation) {
-                    isCombined = true;
-                    boardId = correspondingBoardInvitation.board_id;
-                    board = boards.find(b => b.id === parseInt(boardId));
-                    console.log("Marked as combined invitation with board:", board?.title);
-                  }
-                }
-                
-                    return {
-                      ...invitation,
-                  workspaces: workspace ? { name: workspace.name } : null,
-                  boards: board ? { title: board.title } : null,
-                  invitation_type: isCombined ? 'combined' : 'workspace',
-                  board_id: boardId
-                    };
-                  });
-            } catch (err) {
-              console.error("Error fetching workspace and board names for invitations:", err);
             }
+
+            // Fetch board names for combined invitations
+            let boards = [];
+            if (boardIds.length > 0) {
+              const { data: boardsData, error: boardsError } = await supabase
+                .from("boards")
+                .select("id, title")
+                .in("id", boardIds);
+
+              if (!boardsError && boardsData) {
+                boards = boardsData;
+                console.log("Boards found:", boards);
+              } else {
+                console.error("Error fetching boards:", boardsError);
+              }
+            }
+
+            // Combine workspace and board data
+            workspaceInvitationsWithNames = workspaceInvitationsWithNames.map(invitation => {
+              const workspace = workspaces.find(w => w.id === invitation.workspace_id);
+              
+              // Check if this is a combined invitation by looking at the role field first
+              let isCombined = invitation.role && invitation.role.includes('+board:');
+              let boardId = null;
+              let board = null;
+              
+              if (isCombined) {
+                // Extract board ID from role field
+                boardId = invitation.role.split('+board:')[1];
+                board = boardId ? boards.find(b => b.id === parseInt(boardId)) : null;
+              } else {
+                // Check if there's a corresponding board invitation for the same user
+                console.log("Checking for corresponding board invitation for user:", invitation.invited_user_id);
+                console.log("Available board invitations:", boardInvitationsData?.map(bi => ({ 
+                  invited_user_id: bi.invited_user_id, 
+                  board_id: bi.board_id 
+                })));
+                
+                const correspondingBoardInvitation = boardInvitationsData?.find(boardInv => 
+                  boardInv.invited_user_id === invitation.invited_user_id
+                );
+                
+                console.log("Found corresponding board invitation:", correspondingBoardInvitation);
+                
+                if (correspondingBoardInvitation) {
+                  isCombined = true;
+                  boardId = correspondingBoardInvitation.board_id;
+                  board = boards.find(b => b.id === parseInt(boardId));
+                  console.log("Marked as combined invitation with board:", board?.title);
+                }
+              }
+              
+              return {
+                ...invitation,
+                workspaces: workspace ? { name: workspace.name } : null,
+                boards: board ? { title: board.title } : null,
+                invitation_type: isCombined ? 'combined' : 'workspace',
+                board_id: boardId
+              };
+            });
+          } catch (err) {
+            console.error("Error fetching workspace and board names for invitations:", err);
           }
-          console.log("Final workspace invitations with names:", workspaceInvitationsWithNames);
-          setWorkspaceInvitations(workspaceInvitationsWithNames);
-          
-          // Now filter out board invitations that have corresponding workspace invitations
-          // This will make them appear as combined invitations
-          console.log("Filtering board invitations. Total board invitations:", boardInvitationsData?.length || 0);
-          console.log("Workspace invitations with names:", workspaceInvitationsWithNames?.map(wi => ({
-            invited_user_id: wi.invited_user_id,
-            invitation_type: wi.invitation_type
-          })));
-          
-          const filteredBoardInvitations = (boardInvitationsData || []).filter(boardInv => {
-            // Check if there's a corresponding workspace invitation for the same user
-            const hasCorrespondingWorkspaceInvitation = workspaceInvitationsWithNames?.some(workspaceInv => 
-              workspaceInv.invited_user_id === boardInv.invited_user_id
-            );
-            
-            console.log(`Board invitation for user ${boardInv.invited_user_id} has corresponding workspace invitation:`, hasCorrespondingWorkspaceInvitation);
-            
-            return !hasCorrespondingWorkspaceInvitation;
-          });
-          
-          console.log("Filtered board invitations (removed combined ones):", filteredBoardInvitations.length);
-          setBoardInvitations(filteredBoardInvitations);
         }
+        console.log("Final workspace invitations with names:", workspaceInvitationsWithNames);
+        setWorkspaceInvitations(workspaceInvitationsWithNames);
+        
+        // Now filter out board invitations that have corresponding workspace invitations
+        // This will make them appear as combined invitations
+        console.log("Filtering board invitations. Total board invitations:", boardInvitationsData?.length || 0);
+        console.log("Workspace invitations with names:", workspaceInvitationsWithNames?.map(wi => ({
+          invited_user_id: wi.invited_user_id,
+          invitation_type: wi.invitation_type
+        })));
+        
+        const filteredBoardInvitations = (boardInvitationsData || []).filter(boardInv => {
+          // Check if there's a corresponding workspace invitation for the same user
+          const hasCorrespondingWorkspaceInvitation = workspaceInvitationsWithNames?.some(workspaceInv => 
+            workspaceInv.invited_user_id === boardInv.invited_user_id
+          );
+          
+          console.log(`Board invitation for user ${boardInv.invited_user_id} has corresponding workspace invitation:`, hasCorrespondingWorkspaceInvitation);
+          
+          return !hasCorrespondingWorkspaceInvitation;
+        });
+        
+        console.log("Filtered board invitations (removed combined ones):", filteredBoardInvitations.length);
+        setBoardInvitations(filteredBoardInvitations);
+      }
 
         // Get usernames for all inviters
         const allInvitations = [...(boardInvitationsData || []), ...(workspaceInvitationsData || [])];
@@ -329,9 +328,20 @@ function AuthenticatedHome({ username }) {
       } finally {
         setLoading(false);
       }
+  };
+
+  useEffect(() => {
+    fetchInvitations();
+  }, []);
+
+  // Refresh invitations when user returns to the page
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchInvitations();
     };
 
-    fetchInvitations();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const handleInvitationResponse = async (invitationId, action, type) => {
@@ -346,16 +356,14 @@ function AuthenticatedHome({ username }) {
 
           if (error) {
             console.error("Error accepting board invitation:", error);
-            alert("Failed to accept invitation. Please try again.");
             return;
           }
 
           if (data) {
             // Remove the invitation from the list
             setBoardInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-            alert("Successfully joined the board!");
-          } else {
-            alert("Failed to accept invitation. It may have already been processed.");
+            // Redirect to boards page to see the new board
+            window.location.href = '/boards';
           }
         } else if (type === 'workspace') {
           // Check if this is a combined invitation
@@ -373,7 +381,6 @@ function AuthenticatedHome({ username }) {
 
             if (workspaceError) {
               console.error("Error accepting workspace invitation:", workspaceError);
-              alert("Failed to accept workspace invitation. Please try again.");
               return;
             }
 
@@ -396,7 +403,6 @@ function AuthenticatedHome({ username }) {
 
                 if (boardError) {
                   console.error("Error fetching board data:", boardError);
-                  alert("Joined workspace but failed to add to board. Please contact support.");
                   return;
               }
 
@@ -417,20 +423,19 @@ function AuthenticatedHome({ username }) {
 
               if (updateBoardError) {
                 console.error("Error adding user to board:", updateBoardError);
-                alert("Joined workspace but failed to add to board. Please contact support.");
                 return;
               }
 
               // Remove the invitation from the list
               setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-              alert(`Successfully joined the workspace "${invitation.workspaces?.name}" and board "${invitation.boards?.title}"!`);
+              // Redirect to workspace boards page
+              window.location.href = `/workspace/${invitation.workspace_id}/boards`;
               } else {
                 // Regular workspace invitation (no board)
                 setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-                alert(`Successfully joined the workspace "${invitation.workspaces?.name}"!`);
+                // Redirect to workspace boards page
+                window.location.href = `/workspace/${invitation.workspace_id}/boards`;
               }
-            } else {
-              alert("Failed to accept invitation. It may have already been processed.");
             }
           } else {
             // Regular workspace invitation
@@ -440,17 +445,15 @@ function AuthenticatedHome({ username }) {
 
           if (error) {
             console.error("Error accepting workspace invitation:", error);
-            alert("Failed to accept invitation. Please try again.");
             return;
           }
 
           if (data) {
             // Remove the invitation from the list
             setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
-            alert("Successfully joined the workspace!");
-          } else {
-            alert("Failed to accept invitation. It may have already been processed.");
-            }
+            // Redirect to workspace page
+            window.location.href = '/workspace';
+          }
           }
         }
       } else if (action === 'decline') {
@@ -467,7 +470,6 @@ function AuthenticatedHome({ username }) {
 
         if (error) {
           console.error("Error declining invitation:", error);
-          alert("Failed to decline invitation. Please try again.");
           return;
         }
 
@@ -477,11 +479,9 @@ function AuthenticatedHome({ username }) {
         } else {
           setWorkspaceInvitations(prev => prev.filter(inv => inv.id !== invitationId));
         }
-        alert("Invitation declined.");
       }
     } catch (error) {
       console.error("Error handling invitation:", error);
-      alert("An unexpected error occurred. Please try again.");
     } finally {
       setProcessing(null);
     }

@@ -209,8 +209,6 @@ function WorkspaceBoardsContent() {
   const removeMemberFromWorkspace = async (memberId) => {
     if (!isWorkspaceOwner) return;
 
-    console.log("Removing member with ID:", memberId, "from workspace:", workspaceId);
-    console.log("Current workspace members before removal:", workspaceMembers);
 
     try {
       // First, check if the invitation exists and get details
@@ -223,15 +221,7 @@ function WorkspaceBoardsContent() {
       if (checkError) {
         console.error("Error checking existing invitation:", checkError);
       } else {
-        console.log("Existing invitation for member:", existingInvitation);
         if (existingInvitation && existingInvitation.length > 0) {
-          console.log("Member invitation details:", {
-            id: existingInvitation[0].id,
-            workspace_id: existingInvitation[0].workspace_id,
-            invited_user_id: existingInvitation[0].invited_user_id,
-            status: existingInvitation[0].status,
-            created_at: existingInvitation[0].created_at
-          });
         }
       }
 
@@ -240,23 +230,17 @@ function WorkspaceBoardsContent() {
 
       if (existingInvitation && existingInvitation.length > 0) {
         const invitationId = existingInvitation[0].id;
-        console.log("Using status update approach for invitation ID:", invitationId);
         
         // Try different status update methods
         const statusOptions = ['removed', 'declined', 'cancelled', 'left'];
         
         for (const status of statusOptions) {
-          console.log(`Attempting to update member invitation status to: ${status}`);
-          
           const { error: updateError } = await supabase
             .from("workspace_invitations")
             .update({ status: status })
             .eq("id", invitationId);
 
-          if (updateError) {
-            console.log(`Status '${status}' not available, trying next option...`);
-          } else {
-            console.log(`Successfully updated member invitation status to: ${status}`);
+          if (!updateError) {
             statusUpdateSuccessful = true;
             break;
           }
@@ -288,9 +272,6 @@ function WorkspaceBoardsContent() {
 
       if (!statusUpdateSuccessful) {
         console.error("All member status update methods failed");
-        console.log("This might be due to database permissions or constraints.");
-        console.log("The member may still see the workspace, but they won't have access to its boards.");
-        alert("Unable to update member invitation status. The member may still see the workspace, but they won't have access to its boards. Please contact support if this persists.");
         // Don't return here - continue with board cleanup
       } else {
         console.log("Successfully updated member invitation status");
@@ -382,11 +363,8 @@ function WorkspaceBoardsContent() {
         }
       }
 
-      // Show success message
-      alert("Member removed from workspace successfully. They will no longer have access to this workspace or its boards.");
     } catch (error) {
       console.error("Error removing member:", error);
-      alert("Failed to remove member from workspace");
     }
   };
 
@@ -395,6 +373,19 @@ function WorkspaceBoardsContent() {
       load();
       loadWorkspaceMembers();
     }
+  }, [workspaceId, user]);
+
+  // Refresh workspace data when user returns to the page
+  useEffect(() => {
+    const handleFocus = () => {
+      if (workspaceId && user) {
+        load();
+        loadWorkspaceMembers();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [workspaceId, user]);
 
   const addBoard = (board) => {
@@ -464,6 +455,16 @@ function WorkspaceBoardsContent() {
 
         {/* Action Buttons */}
         <div className="flex items-center space-x-3">
+          <button
+            onClick={() => { load(); loadWorkspaceMembers(); }}
+            disabled={loading}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
           {/* Only show invite workspace button for owners */}
           {isWorkspaceOwner && (
           <button
@@ -1299,9 +1300,6 @@ function ExistingMembersModal({ workspaceOwner, workspaceMembers, isWorkspaceOwn
 
       if (!statusUpdateSuccessful) {
         console.error("All status update methods failed");
-        console.log("This might be due to database permissions or constraints.");
-        console.log("The workspace may still appear in your list, but you won't have access to its boards.");
-        alert("Unable to update workspace invitation status. The workspace may still appear in your list, but you won't have access to its boards. Please contact support if this persists.");
         // Don't return here - continue with board cleanup
       } else {
         console.log("Successfully updated workspace invitation status");
@@ -1387,14 +1385,12 @@ function ExistingMembersModal({ workspaceOwner, workspaceMembers, isWorkspaceOwn
       }
 
       console.log("Successfully left workspace, redirecting...");
-      alert("Successfully left the workspace!");
       onClose();
       
       // Force a hard redirect to ensure the workspace list is refreshed
       window.location.href = "/workspace";
     } catch (error) {
       console.error("Error leaving workspace:", error);
-      alert("Failed to leave workspace. Please try again.");
     } finally {
       setLeaving(false);
       setShowLeaveConfirmation(false);

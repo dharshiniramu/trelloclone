@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
+import NotificationContainer from "@/components/NotificationContainer";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Plus,
@@ -30,6 +31,10 @@ export default function BoardViewPage() {
   const boardId = params.id;
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [cardMembers, setCardMembers] = useState({}); // cardId -> array of members
+  const [showCardMembersModal, setShowCardMembersModal] = useState(false);
+  const [selectedCardForMembers, setSelectedCardForMembers] = useState(null);
+  const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
     const loadBoard = async () => {
@@ -42,10 +47,6 @@ export default function BoardViewPage() {
           .single();
 
         if (error) throw error;
-        console.log("=== BOARD LOADED ===");
-        console.log("Board data:", data);
-        console.log("Workspace ID:", data?.workspace_id);
-        console.log("Workspace ID type:", typeof data?.workspace_id);
         setBoard(data);
       } catch (err) {
         console.error("Error fetching board:", err.message);
@@ -86,20 +87,528 @@ export default function BoardViewPage() {
     );   
   }
 
+  // Load card members for all cards
+  const loadCardMembers = async (cardIds) => {
+    if (!cardIds || cardIds.length === 0) return;
+    
+    try {
+      
+      // First, test if the table exists by doing a simple count
+      const { count, error: countError } = await supabase
+        .from("card_members")
+        .select("*", { count: "exact", head: true });
+      
+      if (countError) {
+        console.error("Table access error:", countError);
+        throw countError;
+      }
+      
+      const { data: members, error } = await supabase
+        .from("card_members")
+        .select(`
+          card_id,
+          user_id,
+          added_at,
+          added_by_user_id
+        `)
+        .in("card_id", cardIds);
+
+      if (error) {
+        console.error("Supabase error details:", error);
+        
+        // If table doesn't exist, initialize empty card members
+        if (error.code === 'PGRST116' || error.message.includes('relation "card_members" does not exist')) {
+          setCardMembers({});
+          return;
+        }
+        
+        throw error;
+      }
+
+      // If we have members, get their profile information
+      if (members && members.length > 0) {
+        const userIds = [...new Set(members.map(member => member.user_id))];
+        
+        const { data: profiles, error: profilesError } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .in("id", userIds);
+
+        if (profilesError) {
+          console.error("Error loading profiles:", profilesError);
+        }
+
+        // Group members by card_id
+        const membersByCard = {};
+        members.forEach(member => {
+          if (!membersByCard[member.card_id]) {
+            membersByCard[member.card_id] = [];
+          }
+          
+          const profile = profiles?.find(p => p.id === member.user_id);
+          membersByCard[member.card_id].push({
+            user_id: member.user_id,
+            added_at: member.added_at,
+            profile: profile || { id: member.user_id, username: 'Unknown', email: '' }
+          });
+        });
+
+        setCardMembers(membersByCard);
+      } else {
+        // No members found, initialize empty
+        setCardMembers({});
+      }
+    } catch (error) {
+      console.error("Error loading card members:", error);
+    }
+  };
+
+  // Add member to card
+  const addCardMember = async (cardId, userId) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
+
+      // Get card details for notification
+      const { data: card, error: cardError } = await supabase
+        .from("cards")
+        .select("title")
+        .eq("id", cardId)
+        .single();
+      
+      if (cardError) {
+        console.error("Error fetching card:", cardError);
+      }
+      
+      const cardTitle = card?.title || 'Unknown Card';
+
+      // Get user profile for notification
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("username, email")
+        .eq("id", userId)
+        .single();
+
+      const { error } = await supabase
+        .from("card_members")
+        .insert({
+          card_id: cardId,
+          user_id: userId,
+          added_by_user_id: user.id
+        });
+
+      if (error) throw error;
+
+      // Show notification to the added user
+      const memberName = profile?.username || profile?.email || 'Unknown User';
+      showNotification(
+        `You have been assigned to the card "${cardTitle}"`,
+        'success'
+      );
+
+      // Reload card members
+      const allCardIds = Object.keys(cardMembers).map(Number);
+      await loadCardMembers(allCardIds);
+    } catch (error) {
+      console.error("Error adding card member:", error);
+      showNotification("Error adding member to card", 'error');
+    }
+  };
+
+  // Remove member from card
+  const removeCardMember = async (cardId, userId) => {
+    try {
+      const { error } = await supabase
+        .from("card_members")
+        .delete()
+        .eq("card_id", cardId)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      // Update local state
+      setCardMembers(prev => ({
+        ...prev,
+        [cardId]: prev[cardId]?.filter(member => member.user_id !== userId) || []
+      }));
+    } catch (error) {
+      console.error("Error removing card member:", error);
+    }
+  };
+
+  // Show notification
+  const showNotification = (message, type = 'info') => {
+    const id = Date.now();
+    const notification = { id, message, type };
+    
+    setNotifications(prev => [...prev, notification]);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
   return (
     <>
       <Navbar />
       <div className="flex h-[calc(100vh-64px)] bg-gray-50">
         <Sidebar />
         <main className="flex-1 overflow-auto">
-          <BoardView board={board} router={router} />
+          <BoardView 
+            board={board} 
+            router={router} 
+            cardMembers={cardMembers}
+            setCardMembers={setCardMembers}
+            showCardMembersModal={showCardMembersModal}
+            setShowCardMembersModal={setShowCardMembersModal}
+            selectedCardForMembers={selectedCardForMembers}
+            setSelectedCardForMembers={setSelectedCardForMembers}
+            loadCardMembers={loadCardMembers}
+            addCardMember={addCardMember}
+            removeCardMember={removeCardMember}
+          />
         </main>
       </div>
+      
+      {/* Card Members Modal */}
+      {showCardMembersModal && selectedCardForMembers && (
+        <CardMembersModal
+          card={selectedCardForMembers}
+          cardMembers={cardMembers[selectedCardForMembers.id] || []}
+          onClose={() => {
+            setShowCardMembersModal(false);
+            setSelectedCardForMembers(null);
+          }}
+          onAddMember={addCardMember}
+          onRemoveMember={removeCardMember}
+          boardId={boardId}
+        />
+      )}
+      
+      {/* Notifications */}
+      <NotificationContainer notifications={notifications} />
     </>
   );
 }
 
-function BoardView({ board, router }) {
+// Card Members Modal Component
+function CardMembersModal({ card, cardMembers, onClose, onAddMember, onRemoveMember, boardId }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [workspaceMembers, setWorkspaceMembers] = useState([]);
+  const [workspaceInfo, setWorkspaceInfo] = useState(null);
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (!error && user) {
+        setCurrentUser(user);
+      }
+    };
+    getCurrentUser();
+    loadWorkspaceInfo();
+  }, [boardId]);
+
+  // Load workspace information
+  const loadWorkspaceInfo = async () => {
+    try {
+      const { data: boardData, error: boardError } = await supabase
+        .from("boards")
+        .select("workspace_id")
+        .eq("id", boardId)
+        .single();
+
+      if (boardError) throw boardError;
+
+      if (boardData.workspace_id) {
+        const { data: workspaceData, error: workspaceError } = await supabase
+          .from("workspaces")
+          .select("id, name")
+          .eq("id", boardData.workspace_id)
+          .single();
+
+        if (workspaceError) throw workspaceError;
+        setWorkspaceInfo(workspaceData);
+        await loadWorkspaceMembers(boardData.workspace_id);
+      }
+    } catch (error) {
+      console.error("Error loading workspace info:", error);
+    }
+  };
+
+  // Load workspace members
+  const loadWorkspaceMembers = async (workspaceId) => {
+    try {
+      // Get workspace owner
+      const { data: ownerData, error: ownerError } = await supabase
+        .from("workspaces")
+        .select("user_id")
+        .eq("id", workspaceId)
+        .single();
+
+      if (ownerError) throw ownerError;
+
+      // Get accepted workspace members
+      const { data: invitations, error: invitationError } = await supabase
+        .from("workspace_invitations")
+        .select("invited_user_id")
+        .eq("workspace_id", workspaceId)
+        .eq("status", "accepted");
+
+      if (invitationError) throw invitationError;
+
+      const userIds = [ownerData.user_id, ...(invitations?.map(inv => inv.invited_user_id) || [])];
+      const { data: memberProfiles, error: membersError } = await supabase
+        .from("profiles")
+        .select("id, username, email")
+        .in("id", userIds);
+
+      if (membersError) throw membersError;
+      setWorkspaceMembers(memberProfiles || []);
+    } catch (error) {
+      console.error("Error loading workspace members:", error);
+    }
+  };
+
+  // Search users
+  const searchUsers = async (query) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (workspaceInfo) {
+        // Search within workspace members
+        const filteredMembers = workspaceMembers.filter(member => 
+          member.username?.toLowerCase().includes(query.toLowerCase()) ||
+          member.email?.toLowerCase().includes(query.toLowerCase())
+        );
+        setSearchResults(filteredMembers);
+      } else {
+        // Search all users
+        const { data: users, error } = await supabase
+          .from("profiles")
+          .select("id, username, email")
+          .or(`username.ilike.%${query}%,email.ilike.%${query}%`)
+          .limit(10);
+
+        if (error) throw error;
+        setSearchResults(users || []);
+      }
+    } catch (error) {
+      console.error("Error searching users:", error);
+      setSearchResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchUsers(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const handleUserSelect = (user) => {
+    if (!selectedMembers.find(member => member.id === user.id)) {
+      setSelectedMembers([...selectedMembers, user]);
+    }
+    setSearchQuery("");
+  };
+
+  const removeSelectedMember = (userId) => {
+    setSelectedMembers(selectedMembers.filter(member => member.id !== userId));
+  };
+
+  const addMembersToCard = async () => {
+    if (selectedMembers.length === 0) return;
+
+    setAdding(true);
+    setError("");
+
+    try {
+      for (const member of selectedMembers) {
+        await onAddMember(card.id, member.id);
+      }
+      setSelectedMembers([]);
+      setSearchQuery("");
+    } catch (error) {
+      setError("Error adding members to card");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId) => {
+    try {
+      await onRemoveMember(card.id, userId);
+    } catch (error) {
+      setError("Error removing member from card");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold">Manage Card Members</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Card: {card.title}</h3>
+        </div>
+
+        {/* Current Members */}
+        <div className="mb-6">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Current Members:</h3>
+          {cardMembers.length === 0 ? (
+            <p className="text-sm text-gray-500">No members assigned to this card</p>
+          ) : (
+            <div className="space-y-2">
+              {cardMembers.map((member) => (
+                <div key={member.user_id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                      {(member.profile?.username || member.profile?.email || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm">
+                        {member.profile?.username || 'Unknown User'}
+                      </div>
+                      {member.profile?.email && (
+                        <div className="text-xs text-gray-500">{member.profile.email}</div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRemoveMember(member.user_id)}
+                    className="text-red-500 hover:text-red-700 p-1"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Add Members */}
+        <div className="mb-4">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Add Members:</h3>
+          
+          {workspaceInfo && (
+            <div className="mb-3 p-2 bg-blue-50 rounded-lg">
+              <div className="text-sm text-blue-800">
+                <strong>Workspace Board:</strong> Only workspace members can be added
+              </div>
+            </div>
+          )}
+
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder={workspaceInfo ? "Search workspace members..." : "Search by email or username..."}
+            />
+            {loading && (
+              <div className="absolute right-3 top-3">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+              </div>
+            )}
+          </div>
+
+          {/* Search Results */}
+          {searchResults.length > 0 && (
+            <div className="mt-2 border border-gray-200 rounded-lg max-h-32 overflow-y-auto">
+              {searchResults.map((user) => (
+                <div
+                  key={user.id}
+                  onClick={() => handleUserSelect(user)}
+                  className="flex items-center space-x-3 p-2 hover:bg-gray-50 cursor-pointer"
+                >
+                  <div className="w-6 h-6 bg-gray-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                    {(user.username || user.email || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">{user.username || 'Unknown'}</div>
+                    {user.email && <div className="text-xs text-gray-500">{user.email}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Selected Members */}
+          {selectedMembers.length > 0 && (
+            <div className="mt-3">
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Selected Members:</h4>
+              <div className="space-y-1">
+                {selectedMembers.map((member) => (
+                  <div key={member.id} className="flex items-center justify-between p-2 bg-blue-50 rounded">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-xs">
+                        {(member.username || member.email || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-sm">{member.username || member.email}</span>
+                    </div>
+                    <button
+                      onClick={() => removeSelectedMember(member.id)}
+                      className="text-blue-500 hover:text-blue-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={addMembersToCard}
+                disabled={adding}
+                className="w-full mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {adding ? "Adding..." : "Add Members to Card"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="text-red-600 text-sm mb-4">{error}</div>
+        )}
+
+        <div className="flex justify-end space-x-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BoardView({ board, router, cardMembers, setCardMembers, showCardMembersModal, setShowCardMembersModal, selectedCardForMembers, setSelectedCardForMembers, loadCardMembers, addCardMember, removeCardMember }) {
   const [lists, setLists] = useState([]);
   const [editingCard, setEditingCard] = useState(null);
   const [showCardModal, setShowCardModal] = useState(false);
@@ -376,8 +885,6 @@ function BoardView({ board, router }) {
       }
     } catch (err) {
       console.error("Error toggling favorite:", err);
-      // Show error message to user
-      alert("Failed to update favorite status. Please try again.");
     } finally {
       setFavoriteLoading(false);
     }
@@ -413,9 +920,25 @@ function BoardView({ board, router }) {
       );
 
       setLists(listsWithCards);
+      
+      // Load card members for all cards
+      const allCardIds = listsWithCards.flatMap(list => list.cards.map(card => card.id));
+      await loadCardMembers(allCardIds);
     };
 
     fetchListsAndCards();
+  }, [board]);
+
+  // Refresh board data when user returns to the page
+  useEffect(() => {
+    const handleFocus = () => {
+      if (board) {
+        fetchListsAndCards();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [board]);
 
   const addCard = async (listId) => {
@@ -480,19 +1003,29 @@ function BoardView({ board, router }) {
   };
 
   const handleCardClick = (card) => {
+    // Check if user can open this card
+    if (!canUserOpenCard(card.id)) {
+      return;
+    }
+    
     setEditingCard(card);
     setShowCardModal(true);
   };
 
   // Drag handler
   const handleDragEnd = async (result) => {
-    const { source, destination } = result;
+    const { source, destination, draggableId } = result;
 
     if (!destination) return;
     if (
       source.droppableId === destination.droppableId &&
       source.index === destination.index
     ) {
+      return;
+    }
+
+    // Check if user can drag this card
+    if (!canUserDragCard(parseInt(draggableId))) {
       return;
     }
 
@@ -545,6 +1078,47 @@ const deleteCard = async (listId, cardId) => {
   );
 };
 
+// Check if user can drag a card
+const canUserDragCard = (cardId) => {
+  if (!currentUser) return false; // Must be logged in to drag
+  
+  const members = cardMembers[cardId] || [];
+  
+  // If no members assigned to the card, only the card creator can drag
+  if (members.length === 0) {
+    // Check if current user is the card creator
+    const card = lists.flatMap(list => list.cards).find(c => c.id === cardId);
+    return card && card.user_id === currentUser.id;
+  }
+  
+  // If members exist, check if current user is a member
+  return members.some(member => member.user_id === currentUser.id);
+};
+
+// Check if user can open/edit a card
+const canUserOpenCard = (cardId) => {
+  if (!currentUser) return false; // Must be logged in to open
+  
+  const members = cardMembers[cardId] || [];
+  
+  // If no members assigned to the card, only the card creator can open
+  if (members.length === 0) {
+    // Check if current user is the card creator
+    const card = lists.flatMap(list => list.cards).find(c => c.id === cardId);
+    return card && card.user_id === currentUser.id;
+  }
+  
+  // If members exist, check if current user is a member
+  return members.some(member => member.user_id === currentUser.id);
+};
+
+// Handle card member management
+const handleCardMemberClick = (e, card) => {
+  e.stopPropagation();
+  setSelectedCardForMembers(card);
+  setShowCardMembersModal(true);
+};
+
 
   return (
     <div
@@ -565,22 +1139,11 @@ const deleteCard = async (listId, cardId) => {
           <div className="flex items-center space-x-4">
             <button 
               onClick={() => {
-                // Debug logging
-                console.log("=== BACK BUTTON DEBUG ===");
-                console.log("Board data:", board);
-                console.log("Workspace ID:", board?.workspace_id);
-                console.log("Workspace ID type:", typeof board?.workspace_id);
-                console.log("Is workspace_id truthy:", !!board?.workspace_id);
-                console.log("Is workspace_id null:", board?.workspace_id === null);
-                console.log("Is workspace_id undefined:", board?.workspace_id === undefined);
-                
                 // Check if board belongs to a workspace
                 if (board?.workspace_id) {
-                  console.log("✅ Navigating to workspace boards page:", `/workspace/${board.workspace_id}/boards`);
                   // Navigate to workspace boards page
                   router.push(`/workspace/${board.workspace_id}/boards`);
                 } else {
-                  console.log("❌ Navigating to general boards page (no workspace_id)");
                   // Navigate to general boards page
                   router.push('/boards');
                 }
@@ -729,13 +1292,18 @@ const deleteCard = async (listId, cardId) => {
                               key={card.id}
                               draggableId={card.id.toString()}
                               index={index}
+                              isDragDisabled={!canUserDragCard(card.id)}
                             >
   {(provided) => (
     <div
       ref={provided.innerRef}
       {...provided.draggableProps}
       {...provided.dragHandleProps}
-      className="bg-white rounded-lg border p-3 hover:shadow-md cursor-pointer relative"
+      className={`bg-white rounded-lg border p-3 hover:shadow-md relative ${
+        canUserDragCard(card.id) 
+          ? 'cursor-pointer' 
+          : 'cursor-not-allowed opacity-75'
+      }`}
       onClick={() => handleCardClick(card)}
     >
       <h4 className="font-medium text-sm">{card.title}</h4>
@@ -762,16 +1330,60 @@ const deleteCard = async (listId, cardId) => {
         )}
       </div>
 
-      {/* ✅ Delete button */}
+      {/* Card members display */}
+      {cardMembers[card.id] && cardMembers[card.id].length > 0 && (
+        <div className="flex items-center space-x-1 mt-2">
+          <Users className="h-3 w-3 text-gray-400" />
+          <div className="flex -space-x-1">
+            {cardMembers[card.id].slice(0, 3).map((member, index) => (
+              <div
+                key={member.user_id}
+                className="w-5 h-5 bg-gray-300 rounded-full flex items-center justify-center text-xs font-medium text-gray-600 border border-white"
+                title={member.profile?.username || member.profile?.email || 'Unknown'}
+              >
+                {(member.profile?.username || member.profile?.email || '?').charAt(0).toUpperCase()}
+              </div>
+            ))}
+            {cardMembers[card.id].length > 3 && (
+              <div className="w-5 h-5 bg-gray-200 rounded-full flex items-center justify-center text-xs font-medium text-gray-600 border border-white">
+                +{cardMembers[card.id].length - 3}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      
+      {/* Drag permission indicator */}
+      {!canUserDragCard(card.id) && (
+        <div className="text-xs text-red-500 mt-1 flex items-center">
+          <span className="mr-1">🔒</span>
+          Only members can move this card
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="absolute top-2 right-2 flex space-x-1">
+        {/* Members button */}
+        <button
+          onClick={(e) => handleCardMemberClick(e, card)}
+          className="p-1 hover:bg-blue-100 rounded"
+          title="Manage members"
+        >
+          <Users className="h-4 w-4 text-blue-500" />
+        </button>
+        
+        {/* Delete button */}
       <button
         onClick={(e) => {
           e.stopPropagation(); // prevent opening modal
           deleteCard(list.id, card.id);
         }}
-        className="absolute top-2 right-2 p-1 hover:bg-red-100 rounded"
+          className="p-1 hover:bg-red-100 rounded"
       >
         <Trash className="h-4 w-4 text-red-500" />
       </button>
+      </div>
     </div>
   )}
 </Draggable>
@@ -866,6 +1478,7 @@ const deleteCard = async (listId, cardId) => {
       {showCardModal && editingCard && (
         <CardEditModal
           card={editingCard}
+          canEdit={canUserOpenCard(editingCard.id)}
           onClose={() => setShowCardModal(false)}
           onSave={(updates) => {
             const listId = lists.find((list) =>
@@ -1294,7 +1907,7 @@ function FilterModal({ filters, setFilters, allLabels, onClose, onClearFilters }
   );
 }
 
-function CardEditModal({ card, onClose, onSave }) {
+function CardEditModal({ card, canEdit, onClose, onSave }) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description || '');
   const [labels, setLabels] = useState(card.labels || []);
@@ -1377,7 +1990,10 @@ function CardEditModal({ card, onClose, onSave }) {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="text-xl font-semibold text-gray-900 border-none outline-none focus:ring-0"
+              disabled={!canEdit}
+              className={`text-xl font-semibold text-gray-900 border-none outline-none focus:ring-0 ${
+                !canEdit ? 'bg-gray-50 cursor-not-allowed' : ''
+              }`}
               placeholder="Enter card title..."
             />
           </div>
@@ -1386,12 +2002,31 @@ function CardEditModal({ card, onClose, onSave }) {
           </button>
         </div>
 
+        {/* Access Control Message */}
+        {!canEdit && (
+          <div className="px-6 py-4 bg-yellow-50 border-b border-yellow-200">
+            <div className="flex items-center space-x-2">
+              <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs">!</span>
+              </div>
+              <div className="text-sm text-yellow-800">
+                <strong>Read-only access:</strong> You can only view this card. Only card members can edit details.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center space-x-3">
             <button 
               onClick={() => setShowLabels(!showLabels)}
-              className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+              disabled={!canEdit}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                canEdit 
+                  ? 'bg-gray-100 hover:bg-gray-200' 
+                  : 'bg-gray-50 cursor-not-allowed opacity-50'
+              }`}
             >
               <Tag className="h-4 w-4" />
               <span>Labels</span>
@@ -1399,7 +2034,12 @@ function CardEditModal({ card, onClose, onSave }) {
             
             <button 
               onClick={() => setShowDates(!showDates)}
-              className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+              disabled={!canEdit}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                canEdit 
+                  ? 'bg-gray-100 hover:bg-gray-200' 
+                  : 'bg-gray-50 cursor-not-allowed opacity-50'
+              }`}
             >
               <Clock className="h-4 w-4" />
               <span>Dates</span>
@@ -1407,7 +2047,12 @@ function CardEditModal({ card, onClose, onSave }) {
             
             <button 
               onClick={() => setShowAttachments(!showAttachments)}
-              className="flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200"
+              disabled={!canEdit}
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors duration-200 ${
+                canEdit 
+                  ? 'bg-gray-100 hover:bg-gray-200' 
+                  : 'bg-gray-50 cursor-not-allowed opacity-50'
+              }`}
             >
               <Plus className="h-4 w-4" />
               <span>Attachments</span>
@@ -1424,7 +2069,10 @@ function CardEditModal({ card, onClose, onSave }) {
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full h-24 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            disabled={!canEdit}
+            className={`w-full h-24 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+              !canEdit ? 'bg-gray-50 cursor-not-allowed' : ''
+            }`}
             placeholder="Add a more detailed description..."
           />
         </div>
@@ -1531,12 +2179,20 @@ function CardEditModal({ card, onClose, onSave }) {
               <textarea
                 value={newAttachment}
                 onChange={(e) => setNewAttachment(e.target.value)}
+                disabled={!canEdit}
                 placeholder="Paste any link here..."
-                className="w-full h-20 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className={`w-full h-20 p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                  !canEdit ? 'bg-gray-50 cursor-not-allowed' : ''
+                }`}
               />
               <button
                 onClick={addAttachment}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+                disabled={!canEdit}
+                className={`px-4 py-2 rounded-lg transition-colors duration-200 ${
+                  canEdit 
+                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
               >
                 Add Attachment
               </button>
@@ -1564,7 +2220,12 @@ function CardEditModal({ card, onClose, onSave }) {
                       </div>
                       <button
                         onClick={() => removeAttachment(attachment.id)}
-                        className="p-1 hover:bg-red-100 rounded text-red-500 ml-2"
+                        disabled={!canEdit}
+                        className={`p-1 rounded ml-2 ${
+                          canEdit 
+                            ? 'hover:bg-red-100 text-red-500' 
+                            : 'text-gray-400 cursor-not-allowed'
+                        }`}
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -1580,9 +2241,14 @@ function CardEditModal({ card, onClose, onSave }) {
         <div className="px-6 py-4 border-t border-gray-200">
           <button
             onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+            disabled={!canEdit}
+            className={`px-4 py-2 rounded-lg transition-colors duration-200 ${
+              canEdit 
+                ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
           >
-            Save Changes
+            {canEdit ? 'Save Changes' : 'Read-only Mode'}
           </button>
         </div>
       </div>
@@ -1945,8 +2611,6 @@ function AddMembersModal({ boardId, onClose }) {
       );
 
       if (declinedInvitations.length > 0) {
-        console.log("Found users who previously declined invitations, cleaning up old records:", declinedInvitations);
-        
         const declinedUserIds = declinedInvitations.map(member => member.id);
         const { error: deleteError } = await supabase
           .from("board_invitations")
@@ -1958,8 +2622,6 @@ function AddMembersModal({ boardId, onClose }) {
         if (deleteError) {
           console.error("Error deleting declined invitations:", deleteError);
           // Continue anyway - the new invitation might still work
-        } else {
-          console.log("Successfully cleaned up declined invitation records");
         }
       }
 
@@ -2001,10 +2663,6 @@ function AddMembersModal({ boardId, onClose }) {
         role: 'member'
       }));
 
-      console.log("Sending invitations:", invitationsToSend);
-      console.log("Board ID:", boardId);
-      console.log("Current user ID:", user.id);
-
       // Validate data before sending
       if (!boardId || !user.id || invitationsToSend.length === 0) {
         setError("Invalid data for sending invitations. Please try again.");
@@ -2019,12 +2677,6 @@ function AddMembersModal({ boardId, onClose }) {
 
       if (error) {
         console.error("Error sending invitations:", error);
-        console.error("Error details:", {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
         
         // Provide more specific error messages
         if (error.code === '42P01') {
@@ -2323,12 +2975,6 @@ function ExistingMembersModal({ boardId, onClose }) {
   // Leave board function
   const handleLeaveBoard = async () => {
     if (!currentUser) return;
-    
-    const confirmLeave = window.confirm(
-      "Are you sure you want to leave this board? You won't be able to access it anymore."
-    );
-    
-    if (!confirmLeave) return;
 
     setLeaving(true);
     try {
@@ -2341,7 +2987,6 @@ function ExistingMembersModal({ boardId, onClose }) {
 
       if (boardError) {
         console.error("Error fetching board:", boardError);
-        alert("Failed to leave board. Please try again.");
         return;
       }
 
@@ -2358,18 +3003,15 @@ function ExistingMembersModal({ boardId, onClose }) {
 
       if (updateError) {
         console.error("Error updating board:", updateError);
-        alert("Failed to leave board. Please try again.");
         return;
       }
 
-      alert("You have successfully left the board.");
       onClose(); // Close the modal
       // Optionally redirect to boards page
       window.location.href = '/boards';
       
     } catch (error) {
       console.error("Error leaving board:", error);
-      alert("An unexpected error occurred. Please try again.");
     } finally {
       setLeaving(false);
     }
@@ -2394,12 +3036,6 @@ function ExistingMembersModal({ boardId, onClose }) {
   // Remove member function
   const handleRemoveMember = async (memberToRemove) => {
     if (!currentUser || !isCurrentUserOwner()) return;
-    
-    const confirmRemove = window.confirm(
-      `Are you sure you want to remove ${memberToRemove.username} from this board?`
-    );
-    
-    if (!confirmRemove) return;
 
     try {
       // Get current board data
@@ -2411,7 +3047,6 @@ function ExistingMembersModal({ boardId, onClose }) {
 
       if (boardError) {
         console.error("Error fetching board:", boardError);
-        alert("Failed to remove member. Please try again.");
         return;
       }
 
@@ -2428,7 +3063,6 @@ function ExistingMembersModal({ boardId, onClose }) {
 
       if (updateError) {
         console.error("Error updating board:", updateError);
-        alert("Failed to remove member. Please try again.");
         return;
       }
 
@@ -2436,12 +3070,9 @@ function ExistingMembersModal({ boardId, onClose }) {
       setMembers(prevMembers => 
         prevMembers.filter(member => member.user_id !== memberToRemove.user_id)
       );
-
-      alert(`${memberToRemove.username} has been removed from the board.`);
       
     } catch (error) {
       console.error("Error removing member:", error);
-      alert("An unexpected error occurred. Please try again.");
     }
   };
 
