@@ -717,11 +717,6 @@ function BoardView({ board, router, cardMembers, setCardMembers, showCardMembers
     window.location.href = `/board/${boardId}`;
   };
 
-  // Helper function to check if current user is board owner
-  const isBoardOwner = () => {
-    if (!currentUser || !board) return false;
-    return board.user_id === currentUser.id;
-  };
 
   // Filter cards based on current filters
   const filterCards = (cards) => {
@@ -890,42 +885,43 @@ function BoardView({ board, router, cardMembers, setCardMembers, showCardMembers
     }
   };
 
-  useEffect(() => {
+  // Function to fetch lists and cards
+  const fetchListsAndCards = async () => {
     if (!board?.id) return;
+    
+    const { data: listsData, error: listsError } = await supabase
+      .from("lists")
+      .select("id, name")
+      .eq("board_id", board.id);
 
-    const fetchListsAndCards = async () => {
-      const { data: listsData, error: listsError } = await supabase
-        .from("lists")
-        .select("id, name")
-        .eq("board_id", board.id);
+    if (listsError) {
+      console.error("Error loading lists:", listsError.message);
+      return;
+    }
 
-      if (listsError) {
-        console.error("Error loading lists:", listsError.message);
-        return;
-      }
+    const listsWithCards = await Promise.all(
+      listsData.map(async (list) => {
+        const { data: cards, error: cardsError } = await supabase
+          .from("cards")
+          .select("id, title, description, due_date, start_date, labels, attachments, list_id")
+          .eq("list_id", list.id);
 
-      const listsWithCards = await Promise.all(
-        listsData.map(async (list) => {
-          const { data: cards, error: cardsError } = await supabase
-            .from("cards")
-            .select("id, title, description, due_date, start_date, labels, attachments, list_id")
-            .eq("list_id", list.id);
+        if (cardsError) {
+          console.error("Error loading cards:", cardsError.message);
+          return { ...list, cards: [] };
+        }
+        return { ...list, cards, collapsed: false };
+      })
+    );
 
-          if (cardsError) {
-            console.error("Error loading cards:", cardsError.message);
-            return { ...list, cards: [] };
-          }
-          return { ...list, cards, collapsed: false };
-        })
-      );
+    setLists(listsWithCards);
+    
+    // Load card members for all cards
+    const allCardIds = listsWithCards.flatMap(list => list.cards.map(card => card.id));
+    await loadCardMembers(allCardIds);
+  };
 
-      setLists(listsWithCards);
-      
-      // Load card members for all cards
-      const allCardIds = listsWithCards.flatMap(list => list.cards.map(card => card.id));
-      await loadCardMembers(allCardIds);
-    };
-
+  useEffect(() => {
     fetchListsAndCards();
   }, [board]);
 
@@ -1078,9 +1074,18 @@ const deleteCard = async (listId, cardId) => {
   );
 };
 
+// Check if user is board owner
+const isBoardOwner = () => {
+  if (!currentUser || !board) return false;
+  return board.user_id === currentUser.id;
+};
+
 // Check if user can drag a card
 const canUserDragCard = (cardId) => {
   if (!currentUser) return false; // Must be logged in to drag
+  
+  // Board owners can drag any card
+  if (isBoardOwner()) return true;
   
   const members = cardMembers[cardId] || [];
   
@@ -1095,9 +1100,12 @@ const canUserDragCard = (cardId) => {
   return members.some(member => member.user_id === currentUser.id);
 };
 
-// Check if user can open/edit a card
+// Check if user can open/view a card
 const canUserOpenCard = (cardId) => {
   if (!currentUser) return false; // Must be logged in to open
+  
+  // Board owners can open any card
+  if (isBoardOwner()) return true;
   
   const members = cardMembers[cardId] || [];
   
@@ -1110,6 +1118,56 @@ const canUserOpenCard = (cardId) => {
   
   // If members exist, check if current user is a member
   return members.some(member => member.user_id === currentUser.id);
+};
+
+// Check if user can add lists (board owners and any board members)
+const canUserAddLists = () => {
+  if (!currentUser || !board) return false;
+  
+  // Board owners can always add lists
+  if (isBoardOwner()) return true;
+  
+  // Check if user is a board member (not just card member)
+  if (board.members && Array.isArray(board.members)) {
+    return board.members.some(member => 
+      member.user_id === currentUser.id && 
+      (member.role === 'owner' || member.role === 'admin' || member.role === 'member')
+    );
+  }
+  
+  return false;
+};
+
+// Check if user can add cards (only board owners)
+const canUserAddCards = () => {
+  if (!currentUser || !board) return false;
+  
+  // Only board owners can add cards
+  return isBoardOwner();
+};
+
+// Check if user can edit a card (only board owners)
+const canUserEditCard = (cardId) => {
+  if (!currentUser) return false;
+  
+  // Only board owners can edit cards
+  return isBoardOwner();
+};
+
+// Check if user can manage card members (only board owners)
+const canUserManageCardMembers = (cardId) => {
+  if (!currentUser) return false;
+  
+  // Only board owners can manage card members
+  return isBoardOwner();
+};
+
+// Check if user can delete cards (only board owners)
+const canUserDeleteCard = (cardId) => {
+  if (!currentUser) return false;
+  
+  // Only board owners can delete cards
+  return isBoardOwner();
 };
 
 // Handle card member management
@@ -1259,12 +1317,14 @@ const handleCardMemberClick = (e, card) => {
         <ChevronUp className="h-4 w-4 text-gray-500" />
       )}
     </button>
-    <button
-      onClick={() => deleteList(list.id)}
-      className="p-1 hover:bg-red-100 rounded"
-    >
-      <Trash className="h-4 w-4 text-red-500" />
-    </button>
+    {isBoardOwner() && (
+      <button
+        onClick={() => deleteList(list.id)}
+        className="p-1 hover:bg-red-100 rounded"
+      >
+        <Trash className="h-4 w-4 text-red-500" />
+      </button>
+    )}
   </div>
 </div>
 
@@ -1287,116 +1347,133 @@ const handleCardMemberClick = (e, card) => {
                             </button>
                           </div>
                         ) : (
-                          filterCards(list.cards).map((card, index) => (
-                            <Draggable
-                              key={card.id}
-                              draggableId={card.id.toString()}
-                              index={index}
-                              isDragDisabled={!canUserDragCard(card.id)}
-                            >
-  {(provided) => (
-    <div
-      ref={provided.innerRef}
-      {...provided.draggableProps}
-      {...provided.dragHandleProps}
-      className={`bg-white rounded-lg border p-3 hover:shadow-md relative ${
-        canUserDragCard(card.id) 
-          ? 'cursor-pointer' 
-          : 'cursor-not-allowed opacity-75'
-      }`}
-      onClick={() => handleCardClick(card)}
-    >
-      <h4 className="font-medium text-sm">{card.title}</h4>
-      <div className="flex items-center space-x-2 text-xs text-gray-500 mt-2">
-        {card.labels && card.labels.length > 0 && (
-          <div className="flex space-x-1">
-            {card.labels.map((label, index) => (
-              <span
-                key={index}
-                className={`${label.color} text-white px-1 py-0.5 rounded text-xs`}
-              >
-                {label.name}
-              </span>
-            ))}
-          </div>
-        )}
-        {card.due_date && (
-          <span>
-            📅 {new Date(card.due_date).toLocaleDateString()}
-          </span>
-        )}
-        {card.attachments && card.attachments.length > 0 && (
-          <span>📎 {card.attachments.length}</span>
-        )}
-      </div>
-
-      {/* Card members display */}
-      {cardMembers[card.id] && cardMembers[card.id].length > 0 && (
-        <div className="flex items-center space-x-1 mt-2">
-          <Users className="h-3 w-3 text-gray-400" />
-          <div className="flex -space-x-1">
-            {cardMembers[card.id].slice(0, 3).map((member, index) => (
-              <div
-                key={member.user_id}
-                className="w-5 h-5 bg-gray-300 rounded-full flex items-center justify-center text-xs font-medium text-gray-600 border border-white"
-                title={member.profile?.username || member.profile?.email || 'Unknown'}
-              >
-                {(member.profile?.username || member.profile?.email || '?').charAt(0).toUpperCase()}
-              </div>
-            ))}
-            {cardMembers[card.id].length > 3 && (
-              <div className="w-5 h-5 bg-gray-200 rounded-full flex items-center justify-center text-xs font-medium text-gray-600 border border-white">
-                +{cardMembers[card.id].length - 3}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      
-      
-      {/* Drag permission indicator */}
-      {!canUserDragCard(card.id) && (
-        <div className="text-xs text-red-500 mt-1 flex items-center">
-          <span className="mr-1">🔒</span>
-          Only members can move this card
-        </div>
-      )}
-
-      {/* Action buttons */}
-      <div className="absolute top-2 right-2 flex space-x-1">
-        {/* Members button */}
-        <button
-          onClick={(e) => handleCardMemberClick(e, card)}
-          className="p-1 hover:bg-blue-100 rounded"
-          title="Manage members"
-        >
-          <Users className="h-4 w-4 text-blue-500" />
-        </button>
-        
-        {/* Delete button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation(); // prevent opening modal
-          deleteCard(list.id, card.id);
-        }}
-          className="p-1 hover:bg-red-100 rounded"
+                          filterCards(list.cards).map((card, index) => {
+                            const canView = canUserOpenCard(card.id);
+                            const canDrag = canUserDragCard(card.id);
+                            
+                            return (
+                              <Draggable
+                                key={card.id}
+                                draggableId={card.id.toString()}
+                                index={index}
+                                isDragDisabled={!canDrag}
+                              >
+    {(provided) => (
+      <div
+        ref={provided.innerRef}
+        {...provided.draggableProps}
+        {...provided.dragHandleProps}
+        className={`bg-white rounded-lg border p-3 hover:shadow-md relative ${
+          canDrag 
+            ? 'cursor-pointer' 
+            : 'cursor-not-allowed opacity-75'
+        } ${!canView ? 'bg-gray-100 border-gray-300' : ''}`}
+        onClick={() => canView ? handleCardClick(card) : null}
       >
-        <Trash className="h-4 w-4 text-red-500" />
-      </button>
-      </div>
-    </div>
-  )}
-</Draggable>
+        {canView ? (
+          <>
+            <h4 className="font-medium text-sm">{card.title}</h4>
+            <div className="flex items-center space-x-2 text-xs text-gray-500 mt-2">
+              {card.labels && card.labels.length > 0 && (
+                <div className="flex space-x-1">
+                  {card.labels.map((label, index) => (
+                    <span
+                      key={index}
+                      className={`${label.color} text-white px-1 py-0.5 rounded text-xs`}
+                    >
+                      {label.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {card.due_date && (
+                <span>
+                  📅 {new Date(card.due_date).toLocaleDateString()}
+                </span>
+              )}
+              {card.attachments && card.attachments.length > 0 && (
+                <span>📎 {card.attachments.length}</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-4">
+            <div className="text-gray-400 text-sm mb-2">🔒</div>
+            <div className="text-gray-500 text-xs">Restricted Access</div>
+            <div className="text-gray-400 text-xs">You're not a member of this card</div>
+          </div>
+        )}
 
-                          ))
+        {/* Card members display - only show for viewable cards */}
+        {canView && cardMembers[card.id] && cardMembers[card.id].length > 0 && (
+          <div className="flex items-center space-x-1 mt-2">
+            <Users className="h-3 w-3 text-gray-400" />
+            <div className="flex -space-x-1">
+              {cardMembers[card.id].slice(0, 3).map((member, index) => (
+                <div
+                  key={member.user_id}
+                  className="w-5 h-5 bg-gray-300 rounded-full flex items-center justify-center text-xs font-medium text-gray-600 border border-white"
+                  title={member.profile?.username || member.profile?.email || 'Unknown'}
+                >
+                  {(member.profile?.username || member.profile?.email || '?').charAt(0).toUpperCase()}
+                </div>
+              ))}
+              {cardMembers[card.id].length > 3 && (
+                <div className="w-5 h-5 bg-gray-200 rounded-full flex items-center justify-center text-xs font-medium text-gray-600 border border-white">
+                  +{cardMembers[card.id].length - 3}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Drag permission indicator - only show for viewable cards */}
+        {canView && !canUserDragCard(card.id) && (
+          <div className="text-xs text-red-500 mt-1 flex items-center">
+            <span className="mr-1">🔒</span>
+            Only card members can move this card
+          </div>
+        )}
+
+        {/* Action buttons - only show for board owners and viewable cards */}
+        {canView && isBoardOwner() && (
+          <div className="absolute top-2 right-2 flex space-x-1">
+            {/* Members button */}
+            <button
+              onClick={(e) => handleCardMemberClick(e, card)}
+              className="p-1 hover:bg-blue-100 rounded"
+              title="Manage members"
+            >
+              <Users className="h-4 w-4 text-blue-500" />
+            </button>
+            
+            {/* Delete button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation(); // prevent opening modal
+                deleteCard(list.id, card.id);
+              }}
+              className="p-1 hover:bg-red-100 rounded"
+            >
+              <Trash className="h-4 w-4 text-red-500" />
+            </button>
+          </div>
+        )}
+      </div>
+    )}
+  </Draggable>
+                            );
+                          })
                         )}
                         {provided.placeholder}
-                        <button
-                          onClick={() => addCard(list.id)}
-                          className="w-full p-3 border-2 border-dashed rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-600"
-                        >
-                          <Plus className="h-4 w-4" /> Add a card
-                        </button>
+                        {canUserAddCards() && (
+                          <button
+                            onClick={() => addCard(list.id)}
+                            className="w-full p-3 border-2 border-dashed rounded-lg text-gray-500 hover:border-gray-400 hover:text-gray-600"
+                          >
+                            <Plus className="h-4 w-4" /> Add a card
+                          </button>
+                        )}
                       </div>
                     )}
                   </Droppable>
@@ -1436,14 +1513,16 @@ const handleCardMemberClick = (e, card) => {
               </div>
             </div>
           ) : (
-            <div className="flex-shrink-0 w-80">
-              <button
-                onClick={() => setShowNewListInput(true)}
-                className="w-full h-12 bg-white/90 rounded-lg shadow-sm border-2 border-dashed text-gray-500"
-              >
-                <Plus className="h-4 w-4" /> Add another list
-              </button>
-            </div>
+            canUserAddLists() && (
+              <div className="flex-shrink-0 w-80">
+                <button
+                  onClick={() => setShowNewListInput(true)}
+                  className="w-full h-12 bg-white/90 rounded-lg shadow-sm border-2 border-dashed text-gray-500"
+                >
+                  <Plus className="h-4 w-4" /> Add another list
+                </button>
+              </div>
+            )
           )}
         </div>
       </DragDropContext>
@@ -1478,7 +1557,8 @@ const handleCardMemberClick = (e, card) => {
       {showCardModal && editingCard && (
         <CardEditModal
           card={editingCard}
-          canEdit={canUserOpenCard(editingCard.id)}
+          canEdit={canUserEditCard(editingCard.id)}
+          canView={canUserOpenCard(editingCard.id)}
           onClose={() => setShowCardModal(false)}
           onSave={(updates) => {
             const listId = lists.find((list) =>
@@ -1907,7 +1987,7 @@ function FilterModal({ filters, setFilters, allLabels, onClose, onClearFilters }
   );
 }
 
-function CardEditModal({ card, canEdit, onClose, onSave }) {
+function CardEditModal({ card, canEdit, canView, onClose, onSave }) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description || '');
   const [labels, setLabels] = useState(card.labels || []);
@@ -2003,14 +2083,27 @@ function CardEditModal({ card, canEdit, onClose, onSave }) {
         </div>
 
         {/* Access Control Message */}
-        {!canEdit && (
-          <div className="px-6 py-4 bg-yellow-50 border-b border-yellow-200">
+        {!canEdit && canView && (
+          <div className="px-6 py-4 bg-blue-50 border-b border-blue-200">
             <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs">!</span>
+              <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs">👁</span>
               </div>
-              <div className="text-sm text-yellow-800">
-                <strong>Read-only access:</strong> You can only view this card. Only card members can edit details.
+              <div className="text-sm text-blue-800">
+                <strong>View-only access:</strong> You can view this card but only board owners can edit details.
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {!canView && (
+          <div className="px-6 py-4 bg-red-50 border-b border-red-200">
+            <div className="flex items-center space-x-2">
+              <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                <span className="text-white text-xs">🔒</span>
+              </div>
+              <div className="text-sm text-red-800">
+                <strong>Access denied:</strong> You don't have permission to view this card.
               </div>
             </div>
           </div>

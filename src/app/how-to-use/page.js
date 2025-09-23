@@ -62,7 +62,7 @@ export default function HowToUse() {
                 Notifications
               </h4>
               <p className="text-sm text-gray-700">
-                Click the bell icon to go to your home page where you can see all your notifications and recent activity.
+                Click the bell icon to go to your home page where you can see all your notifications and recent activity and also the home option at left sidebar refers to the same.
               </p>
             </div>
             
@@ -72,7 +72,7 @@ export default function HowToUse() {
                 Account Menu
               </h4>
               <p className="text-sm text-gray-700">
-                Click on your profile to access account settings, edit your profile, create workspaces, and sign out.
+                Click on your profile to access edit your profile and sign out.
               </p>
             </div>
             
@@ -83,6 +83,26 @@ export default function HowToUse() {
               </h4>
               <p className="text-sm text-gray-700">
                 Workspaces help you organize multiple boards. Each workspace can contain multiple boards for related projects.
+              </p>
+            </div>
+            
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h4 className="font-semibold text-gray-900 mb-2 flex items-center">
+                <Layout className="h-4 w-4 mr-2" />
+                Boards
+              </h4>
+              <p className="text-sm text-gray-700">
+                A board can come inside any workspace or without any workspace also. Boards help you organize multiple lists. Each list can contain multiple cards which are their assigned tasks.
+              </p>
+            </div>
+            
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h4 className="font-semibold text-gray-900 mb-2 flex items-center">
+                <Plus className="h-4 w-4 mr-2" />
+                Templates
+              </h4>
+              <p className="text-sm text-gray-700">
+                Templates has 4 categories each having 4 templates. You can directly create boards from whichever template you like or also choose when creating boards separately.
               </p>
             </div>
           </div>
@@ -105,10 +125,7 @@ export default function HowToUse() {
           <div className="space-y-3">
             <h4 className="font-semibold text-gray-900">Creating a Workspace:</h4>
             <ol className="list-decimal list-inside space-y-2 text-sm text-gray-700">
-              <li>Click on your profile in the top-right corner</li>
-              <li>Select "Create Workspace" from the dropdown menu</li>
-              <li>Give your workspace a descriptive name</li>
-              <li>Add a description (optional) to help team members understand its purpose</li>
+              <li>Create a workspace by going to workspaces → create workspaces</li>
             </ol>
           </div>
           
@@ -118,7 +135,6 @@ export default function HowToUse() {
               <li>View all your workspaces from the main dashboard</li>
               <li>Click on a workspace to see all its boards</li>
               <li>Add members to collaborate on workspace projects</li>
-              <li>Customize workspace settings and permissions</li>
             </ul>
           </div>
         </div>
@@ -143,34 +159,8 @@ export default function HowToUse() {
               <li>Go to your workspace or the main boards page</li>
               <li>Click the "Create Board" button</li>
               <li>Choose a board template or start from scratch</li>
-              <li>Give your board a name and description</li>
-              <li>Select a background color or image</li>
-              <li>Set privacy settings (private or public)</li>
+              <li>Give your board a name and add members necessarily</li>
             </ol>
-          </div>
-          
-          <div className="space-y-3">
-            <h4 className="font-semibold text-gray-900">Board Features:</h4>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <h5 className="font-medium text-gray-900">Customization:</h5>
-                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                  <li>Change background colors or images</li>
-                  <li>Add board descriptions</li>
-                  <li>Set board visibility</li>
-                  <li>Add board members</li>
-                </ul>
-              </div>
-              <div className="space-y-2">
-                <h5 className="font-medium text-gray-900">Organization:</h5>
-                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                  <li>Create multiple lists</li>
-                  <li>Add cards to lists</li>
-                  <li>Move cards between lists</li>
-                  <li>Archive completed lists</li>
-                </ul>
-              </div>
-            </div>
           </div>
         </div>
       )
@@ -215,17 +205,16 @@ export default function HowToUse() {
                 <h5 className="font-medium text-gray-900">Moving Cards:</h5>
                 <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
                   <li>Drag and drop cards between lists</li>
-                  <li>Use the move option in the card menu</li>
                   <li>Cards maintain their position within lists</li>
                 </ul>
               </div>
               <div className="space-y-2">
                 <h5 className="font-medium text-gray-900">Card Details:</h5>
                 <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                  <li>Add descriptions and comments</li>
-                  <li>Set due dates and reminders</li>
+                  <li>Add descriptions</li>
+                  <li>Set due dates and attachments if any</li>
                   <li>Assign cards to team members</li>
-                  <li>Add labels and checklists</li>
+                  <li>Add labels emphasising priority</li>
                 </ul>
               </div>
             </div>
@@ -252,36 +241,8 @@ export default function HowToUse() {
               <li>Open a board or workspace</li>
               <li>Click the "Members" button or icon</li>
               <li>Enter email addresses of people you want to invite</li>
-              <li>Choose their permission level (viewer, editor, admin)</li>
               <li>Send the invitation</li>
             </ol>
-          </div>
-          
-          <div className="space-y-3">
-            <h4 className="font-semibold text-gray-900">Permission Levels:</h4>
-            <div className="space-y-2">
-              <div className="flex items-start space-x-3">
-                <Eye className="h-4 w-4 text-gray-500 mt-0.5" />
-                <div>
-                  <h5 className="font-medium text-gray-900">Viewer</h5>
-                  <p className="text-sm text-gray-700">Can see boards and cards but cannot make changes</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3">
-                <Edit className="h-4 w-4 text-gray-500 mt-0.5" />
-                <div>
-                  <h5 className="font-medium text-gray-900">Editor</h5>
-                  <p className="text-sm text-gray-700">Can create, edit, and move cards and lists</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3">
-                <Settings className="h-4 w-4 text-gray-500 mt-0.5" />
-                <div>
-                  <h5 className="font-medium text-gray-900">Admin</h5>
-                  <p className="text-sm text-gray-700">Can manage members, settings, and delete boards</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )
@@ -303,21 +264,39 @@ export default function HowToUse() {
             <h4 className="font-semibold text-gray-900">Available Templates:</h4>
             <div className="grid md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <h5 className="font-medium text-gray-900">Project Management:</h5>
+                <h5 className="font-medium text-gray-900">Personal Templates:</h5>
                 <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                  <li>Basic Project Board</li>
-                  <li>Agile Development</li>
-                  <li>Marketing Campaign</li>
-                  <li>Event Planning</li>
+                  <li>Personal Task Tracker</li>
+                  <li>Home management</li>
+                  <li>Learning goals</li>
+                  <li>Health and fitness</li>
                 </ul>
               </div>
               <div className="space-y-2">
-                <h5 className="font-medium text-gray-900">Personal Organization:</h5>
+                <h5 className="font-medium text-gray-900">Productivity Templates:</h5>
                 <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-                  <li>Personal Tasks</li>
-                  <li>Habit Tracker</li>
-                  <li>Goal Setting</li>
-                  <li>Learning Path</li>
+                  <li>Time blocking</li>
+                  <li>Habit tracker</li>
+                  <li>Goal setting</li>
+                  <li>Focus sessions</li>
+                </ul>
+              </div>
+              <div className="space-y-2">
+                <h5 className="font-medium text-gray-900">Product Management Templates:</h5>
+                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+                  <li>Product roadmap</li>
+                  <li>Feature prioritization</li>
+                  <li>User research</li>
+                  <li>A/B testing</li>
+                </ul>
+              </div>
+              <div className="space-y-2">
+                <h5 className="font-medium text-gray-900">Project Management Templates:</h5>
+                <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+                  <li>Agile sprint planning</li>
+                  <li>Risk management</li>
+                  <li>Resource allocation</li>
+                  <li>Stakeholder communication</li>
                 </ul>
               </div>
             </div>
@@ -329,8 +308,8 @@ export default function HowToUse() {
               <li>Go to the Templates page from the main navigation</li>
               <li>Browse available templates by category</li>
               <li>Click on a template to preview it</li>
-              <li>Click "Use Template" to create a new board</li>
-              <li>Customize the template to fit your needs</li>
+              <li>Create a board using that template by clicking "create board" over it</li>
+              <li>You can choose templates from separate "create board" option also</li>
             </ol>
           </div>
         </div>
@@ -355,7 +334,7 @@ export default function HowToUse() {
               <li>Use descriptive names for boards, lists, and cards</li>
               <li>Add due dates to important cards</li>
               <li>Use labels to categorize cards by priority or type</li>
-              <li>Archive completed lists to keep boards clean</li>
+              <li>Delete completed lists to keep boards clean</li>
               <li>Add descriptions to provide context for team members</li>
             </ul>
           </div>
@@ -366,25 +345,7 @@ export default function HowToUse() {
               <li>Keep lists to 5-7 items maximum for better visibility</li>
               <li>Use consistent naming conventions across boards</li>
               <li>Regularly review and update card statuses</li>
-              <li>Use checklists for complex tasks</li>
-              <li>Comment on cards to provide updates and context</li>
             </ul>
-          </div>
-          
-          <div className="space-y-3">
-            <h4 className="font-semibold text-gray-900">Keyboard Shortcuts:</h4>
-            <div className="bg-gray-50 rounded-lg p-4">
-              <div className="grid md:grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p><kbd className="bg-white px-2 py-1 rounded border">Space</kbd> - Open card details</p>
-                  <p><kbd className="bg-white px-2 py-1 rounded border">Enter</kbd> - Create new card</p>
-                </div>
-                <div>
-                  <p><kbd className="bg-white px-2 py-1 rounded border">Esc</kbd> - Close modals</p>
-                  <p><kbd className="bg-white px-2 py-1 rounded border">/</kbd> - Focus search</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )
@@ -450,21 +411,6 @@ export default function HowToUse() {
             ))}
           </div>
 
-          {/* Footer */}
-          <div className="bg-gray-50 px-6 py-4 rounded-b-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 text-sm text-gray-600">
-                <Info className="h-4 w-4" />
-                <span>Need more help? Contact support or check our FAQ section.</span>
-              </div>
-              <Link
-                href="/"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 text-sm font-medium"
-              >
-                Get Started
-              </Link>
-            </div>
-          </div>
         </div>
       </div>
     </div>
