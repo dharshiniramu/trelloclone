@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/__tests__
+test-report.html
+test-report.json
 
 # next.js
 /.next/
