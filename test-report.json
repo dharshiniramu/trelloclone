@@ -1,0 +1,526 @@
+{
+  "projectName": "Trello Clone - Test Report",
+  "generatedAt": "2025-09-29T12:00:22.825Z",
+  "environment": {
+    "nodejs": "v24.3.0",
+    "platform": "win32",
+    "jestDom": "v6.1.4",
+    "testingFramework": "Jest v29.7.0",
+    "reactTestingLibrary": "v16.0.0",
+    "userEvent": "v14.5.1"
+  },
+  "summary": {
+    "totalTests": 70,
+    "passed": 70,
+    "failed": 0,
+    "skipped": 0,
+    "errors": 0,
+    "duration": "39.788s"
+  },
+  "testSuites": [
+    {
+      "name": "CreateBoardFromTemplateModal Component",
+      "category": "Component Tests",
+      "tests": [
+        {
+          "name": "renders modal with template information",
+          "status": "passed",
+          "duration": "661ms",
+          "description": "Verifies modal displays template data correctly"
+        },
+        {
+          "name": "allows editing board title",
+          "status": "passed",
+          "duration": "1418ms",
+          "description": "Tests title input functionality"
+        },
+        {
+          "name": "shows create board button as disabled when title is empty",
+          "status": "passed",
+          "duration": "639ms",
+          "description": "Validates form validation"
+        },
+        {
+          "name": "handles cancel button click",
+          "status": "passed",
+          "duration": "273ms",
+          "description": "Tests modal close functionality"
+        },
+        {
+          "name": "successfully creates board with template data",
+          "status": "passed",
+          "duration": "937ms",
+          "description": "Tests complete board creation flow"
+        }
+      ]
+    },
+    {
+      "name": "Navbar Component",
+      "category": "Component Tests",
+      "tests": [
+        {
+          "name": "renders navbar with logo and navigation elements",
+          "status": "passed",
+          "duration": "198ms",
+          "description": "Verifies navbar structure"
+        },
+        {
+          "name": "displays user information when authenticated",
+          "status": "passed",
+          "duration": "483ms",
+          "description": "Tests user display"
+        },
+        {
+          "name": "opens and closes account dropdown",
+          "status": "passed",
+          "duration": "986ms",
+          "description": "Tests dropdown functionality"
+        },
+        {
+          "name": "handles search input and shows search results",
+          "status": "passed",
+          "duration": "853ms",
+          "description": "Tests search functionality"
+        },
+        {
+          "name": "handles logout functionality",
+          "status": "passed",
+          "duration": "544ms",
+          "description": "Tests logout process"
+        }
+      ]
+    },
+    {
+      "name": "NotificationContainer Component",
+      "category": "Component Tests",
+      "tests": [
+        {
+          "name": "renders empty container when no notifications provided",
+          "status": "passed",
+          "duration": "63ms",
+          "description": "Tests empty state"
+        },
+        {
+          "name": "renders single success notification",
+          "status": "passed",
+          "duration": "79ms",
+          "description": "Tests success notifications"
+        },
+        {
+          "name": "renders single error notification",
+          "status": "passed",
+          "duration": "39ms",
+          "description": "Tests error notifications"
+        },
+        {
+          "name": "renders multiple notifications",
+          "status": "passed",
+          "duration": "46ms",
+          "description": "Tests multiple notification display"
+        },
+        {
+          "name": "applies correct CSS classes for different notification types",
+          "status": "passed",
+          "duration": "72ms",
+          "description": "Tests styling"
+        }
+      ]
+    },
+    {
+      "name": "Sidebar Component",
+      "category": "Component Tests",
+      "tests": [
+        {
+          "name": "renders sidebar with navigation items",
+          "status": "passed",
+          "duration": "813ms",
+          "description": "Verifies sidebar structure"
+        },
+        {
+          "name": "highlights active section based on pathname",
+          "status": "passed",
+          "duration": "147ms",
+          "description": "Tests active state highlighting"
+        },
+        {
+          "name": "expands and collapses templates section",
+          "status": "passed",
+          "duration": "357ms",
+          "description": "Tests collapsible sections"
+        },
+        {
+          "name": "navigates to correct links",
+          "status": "passed",
+          "duration": "274ms",
+          "description": "Tests navigation links"
+        },
+        {
+          "name": "shows correct icons for each navigation item",
+          "status": "passed",
+          "duration": "26ms",
+          "description": "Tests icon display"
+        }
+      ]
+    },
+    {
+      "name": "Board Detail Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders navbar component",
+          "status": "passed",
+          "duration": "25ms",
+          "description": "Verifies navbar presence"
+        },
+        {
+          "name": "renders sidebar component",
+          "status": "passed",
+          "duration": "6ms",
+          "description": "Verifies sidebar presence"
+        },
+        {
+          "name": "renders board content",
+          "status": "passed",
+          "duration": "6ms",
+          "description": "Tests main content area"
+        },
+        {
+          "name": "renders page with correct layout structure",
+          "status": "passed",
+          "duration": "8ms",
+          "description": "Tests page structure"
+        },
+        {
+          "name": "renders all main components",
+          "status": "passed",
+          "duration": "8ms",
+          "description": "Comprehensive component check"
+        }
+      ]
+    },
+    {
+      "name": "Boards Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders page with navbar and sidebar",
+          "status": "passed",
+          "duration": "301ms",
+          "description": "Tests layout components"
+        },
+        {
+          "name": "renders page header",
+          "status": "passed",
+          "duration": "269ms",
+          "description": "Tests page title"
+        },
+        {
+          "name": "renders refresh button",
+          "status": "passed",
+          "duration": "115ms",
+          "description": "Tests refresh functionality"
+        },
+        {
+          "name": "renders invite members button",
+          "status": "passed",
+          "duration": "34ms",
+          "description": "Tests invite button"
+        },
+        {
+          "name": "renders create board button",
+          "status": "passed",
+          "duration": "55ms",
+          "description": "Tests create button"
+        },
+        {
+          "name": "shows empty state when no boards",
+          "status": "passed",
+          "duration": "63ms",
+          "description": "Tests empty state"
+        },
+        {
+          "name": "handles refresh button click",
+          "status": "passed",
+          "duration": "301ms",
+          "description": "Tests refresh interaction"
+        },
+        {
+          "name": "handles invite members button click",
+          "status": "passed",
+          "duration": "230ms",
+          "description": "Tests invite interaction"
+        },
+        {
+          "name": "handles create board button click",
+          "status": "passed",
+          "duration": "185ms",
+          "description": "Tests create interaction"
+        },
+        {
+          "name": "renders page with correct layout structure",
+          "status": "passed",
+          "duration": "46ms",
+          "description": "Tests layout structure"
+        }
+      ]
+    },
+    {
+      "name": "Home Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders loading state initially",
+          "status": "passed",
+          "duration": "95ms",
+          "description": "Tests loading state"
+        },
+        {
+          "name": "renders guest landing page when not authenticated",
+          "status": "passed",
+          "duration": "198ms",
+          "description": "Tests guest view"
+        },
+        {
+          "name": "renders authenticated home when user is logged in",
+          "status": "passed",
+          "duration": "124ms",
+          "description": "Tests authenticated view"
+        },
+        {
+          "name": "displays feature sections in guest landing",
+          "status": "passed",
+          "duration": "150ms",
+          "description": "Tests feature display"
+        },
+        {
+          "name": "shows no notifications message when authenticated with no invitations",
+          "status": "passed",
+          "duration": "784ms",
+          "description": "Tests notification state"
+        }
+      ]
+    },
+    {
+      "name": "How to Use Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders page header correctly",
+          "status": "passed",
+          "duration": "750ms",
+          "description": "Tests page header"
+        },
+        {
+          "name": "renders all sections with correct titles",
+          "status": "passed",
+          "duration": "236ms",
+          "description": "Tests section titles"
+        },
+        {
+          "name": "sections are collapsed by default",
+          "status": "passed",
+          "duration": "139ms",
+          "description": "Tests default collapsed state"
+        },
+        {
+          "name": "expands and collapses sections when clicked",
+          "status": "passed",
+          "duration": "863ms",
+          "description": "Tests expand/collapse functionality"
+        },
+        {
+          "name": "renders page with correct layout structure",
+          "status": "passed",
+          "duration": "147ms",
+          "description": "Tests page structure"
+        }
+      ]
+    },
+    {
+      "name": "Login Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders login form with all required fields",
+          "status": "passed",
+          "duration": "694ms",
+          "description": "Tests form structure"
+        },
+        {
+          "name": "handles form input changes",
+          "status": "passed",
+          "duration": "1488ms",
+          "description": "Tests input handling"
+        },
+        {
+          "name": "shows loading state during login",
+          "status": "passed",
+          "duration": "1339ms",
+          "description": "Tests loading state"
+        },
+        {
+          "name": "handles successful login",
+          "status": "passed",
+          "duration": "1268ms",
+          "description": "Tests successful authentication"
+        },
+        {
+          "name": "displays error message on login failure",
+          "status": "passed",
+          "duration": "1378ms",
+          "description": "Tests error handling"
+        }
+      ]
+    },
+    {
+      "name": "Signup Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders signup form with all required fields",
+          "status": "passed",
+          "duration": "819ms",
+          "description": "Tests form structure"
+        },
+        {
+          "name": "handles form input changes",
+          "status": "passed",
+          "duration": "2059ms",
+          "description": "Tests input handling"
+        },
+        {
+          "name": "shows loading state during signup",
+          "status": "passed",
+          "duration": "1477ms",
+          "description": "Tests loading state"
+        },
+        {
+          "name": "handles successful signup",
+          "status": "passed",
+          "duration": "1728ms",
+          "description": "Tests successful registration"
+        },
+        {
+          "name": "displays error message on signup failure",
+          "status": "passed",
+          "duration": "1564ms",
+          "description": "Tests error handling"
+        }
+      ]
+    },
+    {
+      "name": "Templates Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders page with navbar and sidebar",
+          "status": "passed",
+          "duration": "544ms",
+          "description": "Tests layout components"
+        },
+        {
+          "name": "renders templates sidebar with categories",
+          "status": "passed",
+          "duration": "106ms",
+          "description": "Tests template categories"
+        },
+        {
+          "name": "renders personal templates by default",
+          "status": "passed",
+          "duration": "126ms",
+          "description": "Tests default template display"
+        },
+        {
+          "name": "opens create board modal when template is clicked",
+          "status": "passed",
+          "duration": "803ms",
+          "description": "Tests modal opening"
+        },
+        {
+          "name": "navigates to board when board is created",
+          "status": "passed",
+          "duration": "367ms",
+          "description": "Tests board creation flow"
+        }
+      ]
+    },
+    {
+      "name": "Workspace Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders page with navbar and sidebar",
+          "status": "passed",
+          "duration": "1022ms",
+          "description": "Tests layout components"
+        },
+        {
+          "name": "renders page title and buttons",
+          "status": "passed",
+          "duration": "221ms",
+          "description": "Tests page elements"
+        },
+        {
+          "name": "shows empty state when no workspaces",
+          "status": "passed",
+          "duration": "135ms",
+          "description": "Tests empty state"
+        },
+        {
+          "name": "opens create workspace modal when button is clicked",
+          "status": "passed",
+          "duration": "587ms",
+          "description": "Tests modal functionality"
+        },
+        {
+          "name": "renders page with correct layout structure",
+          "status": "passed",
+          "duration": "97ms",
+          "description": "Tests page structure"
+        }
+      ]
+    },
+    {
+      "name": "WorkspaceBoards Page",
+      "category": "Page Tests",
+      "tests": [
+        {
+          "name": "renders page with navbar and sidebar",
+          "status": "passed",
+          "duration": "1270ms",
+          "description": "Tests layout components"
+        },
+        {
+          "name": "shows loading state initially",
+          "status": "passed",
+          "duration": "422ms",
+          "description": "Tests loading state"
+        },
+        {
+          "name": "shows workspace not found when workspace does not exist",
+          "status": "passed",
+          "duration": "246ms",
+          "description": "Tests error handling"
+        },
+        {
+          "name": "renders workspace header with back button",
+          "status": "passed",
+          "duration": "249ms",
+          "description": "Tests header elements"
+        },
+        {
+          "name": "shows owner badge for workspace owner",
+          "status": "passed",
+          "duration": "172ms",
+          "description": "Tests ownership display"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "totalTestSuites": 13,
+    "componentTests": 4,
+    "pageTests": 9,
+    "totalTestCases": 70
+  }
+}

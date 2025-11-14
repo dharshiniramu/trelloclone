@@ -1,0 +1,1533 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trello Clone - Test Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f8fafc;
+            color: #334155;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .section {
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 1rem;
+        }
+
+        .environment-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .env-card {
+            background: white;
+            border-left: 4px solid #3b82f6;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .env-card strong {
+            color: #1e293b;
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+
+        .summary {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+
+        .summary-text {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            color: #475569;
+        }
+
+        .summary-pills {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .pill {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .pill.passed {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .pill.failed {
+            background-color: #fef2f2;
+            color: #dc2626;
+        }
+
+        .pill.skipped {
+            background-color: #fefce8;
+            color: #ca8a04;
+        }
+
+        .pill.errors {
+            background-color: #fef2f2;
+            color: #dc2626;
+        }
+
+        .test-results {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .test-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .test-table th {
+            background-color: #f8fafc;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .test-table td {
+            padding: 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            vertical-align: top;
+        }
+
+        .test-table tr:hover {
+            background-color: #f9fafb;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-badge.passed {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .status-badge.failed {
+            background-color: #fef2f2;
+            color: #dc2626;
+        }
+
+        .status-badge.skipped {
+            background-color: #fefce8;
+            color: #ca8a04;
+        }
+
+        .category-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background-color: #e0e7ff;
+            color: #3730a3;
+        }
+
+        .test-name {
+            font-weight: 500;
+            color: #1e293b;
+        }
+
+        .test-description {
+            color: #64748b;
+            font-size: 0.9rem;
+            margin-top: 0.25rem;
+        }
+
+        .duration {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            color: #64748b;
+        }
+
+        .suite-header {
+            background-color: #f1f5f9;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .stat-label {
+            color: #64748b;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .summary-pills {
+                justify-content: center;
+            }
+            
+            .test-table {
+                font-size: 0.9rem;
+            }
+            
+            .test-table th,
+            .test-table td {
+                padding: 0.75rem 0.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Trello Clone - Test Report</h1>
+        <p>Report generated on 29 Sept 2025, 17:30:22 by Jest Testing Framework</p>
+    </div>
+
+    <div class="container">
+        <div class="section">
+            <h2 class="section-title">Environment</h2>
+            <div class="environment-grid">
+                <div class="env-card">
+                    <strong>Node.js:</strong> v24.3.0
+                </div>
+                <div class="env-card">
+                    <strong>Platform:</strong> win32
+                </div>
+                <div class="env-card">
+                    <strong>Jest DOM:</strong> v6.1.4
+                </div>
+                <div class="env-card">
+                    <strong>Testing Framework:</strong> Jest v29.7.0
+                </div>
+                <div class="env-card">
+                    <strong>React Testing Library:</strong> v16.0.0
+                </div>
+                <div class="env-card">
+                    <strong>User Event:</strong> v14.5.1
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Test Summary</h2>
+            <div class="summary">
+                <div class="summary-text">70 tests took 39.788s.</div>
+                <div class="summary-pills">
+                    <div class="pill passed">✔ 70 Passed</div>
+                    <div class="pill failed">✗ 0 Failed</div>
+                    <div class="pill skipped">⊘ 0 Skipped</div>
+                    <div class="pill errors">⚠ 0 Errors</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Test Results</h2>
+            <div class="test-results">
+                <table class="test-table">
+                    <thead>
+                        <tr>
+                            <th>RESULT</th>
+                            <th>TEST CATEGORY</th>
+                            <th>TEST NAME</th>
+                            <th>DURATION</th>
+                            <th>DESCRIPTION</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Component Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders modal with template information</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">CreateBoardFromTemplateModal Component</div>
+                                    </td>
+                                    <td class="duration">661ms</td>
+                                    <td>
+                                        <div class="test-description">Verifies modal displays template data correctly</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">allows editing board title</div>
+                                        
+                                    </td>
+                                    <td class="duration">1418ms</td>
+                                    <td>
+                                        <div class="test-description">Tests title input functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows create board button as disabled when title is empty</div>
+                                        
+                                    </td>
+                                    <td class="duration">639ms</td>
+                                    <td>
+                                        <div class="test-description">Validates form validation</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles cancel button click</div>
+                                        
+                                    </td>
+                                    <td class="duration">273ms</td>
+                                    <td>
+                                        <div class="test-description">Tests modal close functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">successfully creates board with template data</div>
+                                        
+                                    </td>
+                                    <td class="duration">937ms</td>
+                                    <td>
+                                        <div class="test-description">Tests complete board creation flow</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Component Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders navbar with logo and navigation elements</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Navbar Component</div>
+                                    </td>
+                                    <td class="duration">198ms</td>
+                                    <td>
+                                        <div class="test-description">Verifies navbar structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">displays user information when authenticated</div>
+                                        
+                                    </td>
+                                    <td class="duration">483ms</td>
+                                    <td>
+                                        <div class="test-description">Tests user display</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">opens and closes account dropdown</div>
+                                        
+                                    </td>
+                                    <td class="duration">986ms</td>
+                                    <td>
+                                        <div class="test-description">Tests dropdown functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles search input and shows search results</div>
+                                        
+                                    </td>
+                                    <td class="duration">853ms</td>
+                                    <td>
+                                        <div class="test-description">Tests search functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles logout functionality</div>
+                                        
+                                    </td>
+                                    <td class="duration">544ms</td>
+                                    <td>
+                                        <div class="test-description">Tests logout process</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Component Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders empty container when no notifications provided</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">NotificationContainer Component</div>
+                                    </td>
+                                    <td class="duration">63ms</td>
+                                    <td>
+                                        <div class="test-description">Tests empty state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders single success notification</div>
+                                        
+                                    </td>
+                                    <td class="duration">79ms</td>
+                                    <td>
+                                        <div class="test-description">Tests success notifications</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders single error notification</div>
+                                        
+                                    </td>
+                                    <td class="duration">39ms</td>
+                                    <td>
+                                        <div class="test-description">Tests error notifications</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders multiple notifications</div>
+                                        
+                                    </td>
+                                    <td class="duration">46ms</td>
+                                    <td>
+                                        <div class="test-description">Tests multiple notification display</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">applies correct CSS classes for different notification types</div>
+                                        
+                                    </td>
+                                    <td class="duration">72ms</td>
+                                    <td>
+                                        <div class="test-description">Tests styling</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Component Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders sidebar with navigation items</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Sidebar Component</div>
+                                    </td>
+                                    <td class="duration">813ms</td>
+                                    <td>
+                                        <div class="test-description">Verifies sidebar structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">highlights active section based on pathname</div>
+                                        
+                                    </td>
+                                    <td class="duration">147ms</td>
+                                    <td>
+                                        <div class="test-description">Tests active state highlighting</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">expands and collapses templates section</div>
+                                        
+                                    </td>
+                                    <td class="duration">357ms</td>
+                                    <td>
+                                        <div class="test-description">Tests collapsible sections</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">navigates to correct links</div>
+                                        
+                                    </td>
+                                    <td class="duration">274ms</td>
+                                    <td>
+                                        <div class="test-description">Tests navigation links</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows correct icons for each navigation item</div>
+                                        
+                                    </td>
+                                    <td class="duration">26ms</td>
+                                    <td>
+                                        <div class="test-description">Tests icon display</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders navbar component</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Board Detail Page</div>
+                                    </td>
+                                    <td class="duration">25ms</td>
+                                    <td>
+                                        <div class="test-description">Verifies navbar presence</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders sidebar component</div>
+                                        
+                                    </td>
+                                    <td class="duration">6ms</td>
+                                    <td>
+                                        <div class="test-description">Verifies sidebar presence</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders board content</div>
+                                        
+                                    </td>
+                                    <td class="duration">6ms</td>
+                                    <td>
+                                        <div class="test-description">Tests main content area</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with correct layout structure</div>
+                                        
+                                    </td>
+                                    <td class="duration">8ms</td>
+                                    <td>
+                                        <div class="test-description">Tests page structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders all main components</div>
+                                        
+                                    </td>
+                                    <td class="duration">8ms</td>
+                                    <td>
+                                        <div class="test-description">Comprehensive component check</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with navbar and sidebar</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Boards Page</div>
+                                    </td>
+                                    <td class="duration">301ms</td>
+                                    <td>
+                                        <div class="test-description">Tests layout components</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page header</div>
+                                        
+                                    </td>
+                                    <td class="duration">269ms</td>
+                                    <td>
+                                        <div class="test-description">Tests page title</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders refresh button</div>
+                                        
+                                    </td>
+                                    <td class="duration">115ms</td>
+                                    <td>
+                                        <div class="test-description">Tests refresh functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders invite members button</div>
+                                        
+                                    </td>
+                                    <td class="duration">34ms</td>
+                                    <td>
+                                        <div class="test-description">Tests invite button</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders create board button</div>
+                                        
+                                    </td>
+                                    <td class="duration">55ms</td>
+                                    <td>
+                                        <div class="test-description">Tests create button</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows empty state when no boards</div>
+                                        
+                                    </td>
+                                    <td class="duration">63ms</td>
+                                    <td>
+                                        <div class="test-description">Tests empty state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles refresh button click</div>
+                                        
+                                    </td>
+                                    <td class="duration">301ms</td>
+                                    <td>
+                                        <div class="test-description">Tests refresh interaction</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles invite members button click</div>
+                                        
+                                    </td>
+                                    <td class="duration">230ms</td>
+                                    <td>
+                                        <div class="test-description">Tests invite interaction</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles create board button click</div>
+                                        
+                                    </td>
+                                    <td class="duration">185ms</td>
+                                    <td>
+                                        <div class="test-description">Tests create interaction</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with correct layout structure</div>
+                                        
+                                    </td>
+                                    <td class="duration">46ms</td>
+                                    <td>
+                                        <div class="test-description">Tests layout structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders loading state initially</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Home Page</div>
+                                    </td>
+                                    <td class="duration">95ms</td>
+                                    <td>
+                                        <div class="test-description">Tests loading state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders guest landing page when not authenticated</div>
+                                        
+                                    </td>
+                                    <td class="duration">198ms</td>
+                                    <td>
+                                        <div class="test-description">Tests guest view</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders authenticated home when user is logged in</div>
+                                        
+                                    </td>
+                                    <td class="duration">124ms</td>
+                                    <td>
+                                        <div class="test-description">Tests authenticated view</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">displays feature sections in guest landing</div>
+                                        
+                                    </td>
+                                    <td class="duration">150ms</td>
+                                    <td>
+                                        <div class="test-description">Tests feature display</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows no notifications message when authenticated with no invitations</div>
+                                        
+                                    </td>
+                                    <td class="duration">784ms</td>
+                                    <td>
+                                        <div class="test-description">Tests notification state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page header correctly</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">How to Use Page</div>
+                                    </td>
+                                    <td class="duration">750ms</td>
+                                    <td>
+                                        <div class="test-description">Tests page header</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders all sections with correct titles</div>
+                                        
+                                    </td>
+                                    <td class="duration">236ms</td>
+                                    <td>
+                                        <div class="test-description">Tests section titles</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">sections are collapsed by default</div>
+                                        
+                                    </td>
+                                    <td class="duration">139ms</td>
+                                    <td>
+                                        <div class="test-description">Tests default collapsed state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">expands and collapses sections when clicked</div>
+                                        
+                                    </td>
+                                    <td class="duration">863ms</td>
+                                    <td>
+                                        <div class="test-description">Tests expand/collapse functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with correct layout structure</div>
+                                        
+                                    </td>
+                                    <td class="duration">147ms</td>
+                                    <td>
+                                        <div class="test-description">Tests page structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders login form with all required fields</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Login Page</div>
+                                    </td>
+                                    <td class="duration">694ms</td>
+                                    <td>
+                                        <div class="test-description">Tests form structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles form input changes</div>
+                                        
+                                    </td>
+                                    <td class="duration">1488ms</td>
+                                    <td>
+                                        <div class="test-description">Tests input handling</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows loading state during login</div>
+                                        
+                                    </td>
+                                    <td class="duration">1339ms</td>
+                                    <td>
+                                        <div class="test-description">Tests loading state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles successful login</div>
+                                        
+                                    </td>
+                                    <td class="duration">1268ms</td>
+                                    <td>
+                                        <div class="test-description">Tests successful authentication</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">displays error message on login failure</div>
+                                        
+                                    </td>
+                                    <td class="duration">1378ms</td>
+                                    <td>
+                                        <div class="test-description">Tests error handling</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders signup form with all required fields</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Signup Page</div>
+                                    </td>
+                                    <td class="duration">819ms</td>
+                                    <td>
+                                        <div class="test-description">Tests form structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles form input changes</div>
+                                        
+                                    </td>
+                                    <td class="duration">2059ms</td>
+                                    <td>
+                                        <div class="test-description">Tests input handling</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows loading state during signup</div>
+                                        
+                                    </td>
+                                    <td class="duration">1477ms</td>
+                                    <td>
+                                        <div class="test-description">Tests loading state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">handles successful signup</div>
+                                        
+                                    </td>
+                                    <td class="duration">1728ms</td>
+                                    <td>
+                                        <div class="test-description">Tests successful registration</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">displays error message on signup failure</div>
+                                        
+                                    </td>
+                                    <td class="duration">1564ms</td>
+                                    <td>
+                                        <div class="test-description">Tests error handling</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with navbar and sidebar</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Templates Page</div>
+                                    </td>
+                                    <td class="duration">544ms</td>
+                                    <td>
+                                        <div class="test-description">Tests layout components</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders templates sidebar with categories</div>
+                                        
+                                    </td>
+                                    <td class="duration">106ms</td>
+                                    <td>
+                                        <div class="test-description">Tests template categories</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders personal templates by default</div>
+                                        
+                                    </td>
+                                    <td class="duration">126ms</td>
+                                    <td>
+                                        <div class="test-description">Tests default template display</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">opens create board modal when template is clicked</div>
+                                        
+                                    </td>
+                                    <td class="duration">803ms</td>
+                                    <td>
+                                        <div class="test-description">Tests modal opening</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">navigates to board when board is created</div>
+                                        
+                                    </td>
+                                    <td class="duration">367ms</td>
+                                    <td>
+                                        <div class="test-description">Tests board creation flow</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with navbar and sidebar</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">Workspace Page</div>
+                                    </td>
+                                    <td class="duration">1022ms</td>
+                                    <td>
+                                        <div class="test-description">Tests layout components</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page title and buttons</div>
+                                        
+                                    </td>
+                                    <td class="duration">221ms</td>
+                                    <td>
+                                        <div class="test-description">Tests page elements</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows empty state when no workspaces</div>
+                                        
+                                    </td>
+                                    <td class="duration">135ms</td>
+                                    <td>
+                                        <div class="test-description">Tests empty state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">opens create workspace modal when button is clicked</div>
+                                        
+                                    </td>
+                                    <td class="duration">587ms</td>
+                                    <td>
+                                        <div class="test-description">Tests modal functionality</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with correct layout structure</div>
+                                        
+                                    </td>
+                                    <td class="duration">97ms</td>
+                                    <td>
+                                        <div class="test-description">Tests page structure</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr class="suite-header">
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        <span class="category-badge">Page Tests</span>
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders page with navbar and sidebar</div>
+                                        <div style="margin-top: 0.25rem; font-size: 0.9rem; color: #64748b;">WorkspaceBoards Page</div>
+                                    </td>
+                                    <td class="duration">1270ms</td>
+                                    <td>
+                                        <div class="test-description">Tests layout components</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows loading state initially</div>
+                                        
+                                    </td>
+                                    <td class="duration">422ms</td>
+                                    <td>
+                                        <div class="test-description">Tests loading state</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows workspace not found when workspace does not exist</div>
+                                        
+                                    </td>
+                                    <td class="duration">246ms</td>
+                                    <td>
+                                        <div class="test-description">Tests error handling</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">renders workspace header with back button</div>
+                                        
+                                    </td>
+                                    <td class="duration">249ms</td>
+                                    <td>
+                                        <div class="test-description">Tests header elements</div>
+                                    </td>
+                                </tr>
+                            
+                                <tr >
+                                    <td>
+                                        <span class="status-badge passed">passed</span>
+                                    </td>
+                                    <td>
+                                        
+                                    </td>
+                                    <td>
+                                        <div class="test-name">shows owner badge for workspace owner</div>
+                                        
+                                    </td>
+                                    <td class="duration">172ms</td>
+                                    <td>
+                                        <div class="test-description">Tests ownership display</div>
+                                    </td>
+                                </tr>
+                            
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Add some interactivity
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add click handlers for better UX
+            const rows = document.querySelectorAll('.test-table tbody tr');
+            rows.forEach(row => {
+                row.addEventListener('click', function() {
+                    this.style.backgroundColor = this.style.backgroundColor === 'rgb(239, 246, 255)' ? '' : 'rgb(239, 246, 255)';
+                });
+            });
+        });
+    </script>
+</body>
+</html>
