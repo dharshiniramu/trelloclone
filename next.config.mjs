@@ -36,7 +36,7 @@ const nextConfig = {
   },
   
   // Reduce bundle size
-  swcMinify: true,
+  
 };
 
 export default nextConfig;
